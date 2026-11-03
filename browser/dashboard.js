@@ -1126,6 +1126,19 @@ async function handleNewProjectSend() {
     return;
   }
 
+  // Если есть блоки в Blockly workspace — запускаем интерпретатор.
+  if (typeof hasBlocks === 'function' && hasBlocks()) {
+    npPromptInput.value = "";
+    npPromptInput.focus();
+    npSendBtn.disabled = true;
+    setNpStatus("Запуск блоков…", "");
+    await runBlockly(text);
+    npSendBtn.disabled = false;
+    setNpStatus("✓ Готово", "ok");
+    setTimeout(() => { clearNpStatus(); }, 2000);
+    return;
+  }
+
   const requestId = generateRequestId();
   const now = Date.now();
 

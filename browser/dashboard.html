@@ -9,25 +9,29 @@
 <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png" />
 <style>
   :root {
-    /* Палитра из вашего дизайна */
-    --grad-from: #080808;
-    --grad-to: #395F7B;
-    --glass: rgba(255, 255, 255, 0.05);
-    --glass-strong: rgba(255, 255, 255, 0.08);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --text: #E5E5E5;
-    --text-dim: rgba(229, 229, 229, 0.6);
-    --text-mute: rgba(229, 229, 229, 0.3);
+    /* Палитра из вашего style.css */
+    --grad-from: #121212;
+    --grad-to: #1D2128;
+    --glass: rgba(43, 49, 59, 0.4);
+    --glass-strong: rgba(43, 49, 59, 0.7);
+    --glass-border: #2b313b;
+    --text: rgb(217, 202, 217);
+    --text-dim: rgb(162, 162, 162);
+    --text-mute: rgb(105, 105, 105);
+    --accent: rgb(128, 110, 255);
+    --accent-hover: rgb(148, 130, 175);
     --green: #019A5A;
     --green-soft: rgba(1, 154, 90, 0.7);
     --green-soft-2: rgba(1, 154, 90, 0.8);
     --green-shadow: rgba(1, 154, 90, 0.25);
+    --color-secondary: rgb(158, 78, 218);
     --success: #4caf50;
     --error: #f44336;
     --warn: #ff9800;
-    --radius-lg: 16px;
-    --radius-md: 10px;
-    --radius-sm: 7px;
+    --border: #252525;
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --radius-sm: 4px;
     --sidebar-w: 240px;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
@@ -42,8 +46,8 @@
   }
   body {
     display: flex;
-    /* Градиент-фон из вашего дизайна */
-    background: linear-gradient(180deg, var(--grad-from) 0%, var(--grad-to) 100%);
+    /* Тёмный фон из вашего style.css */
+    background: var(--grad-from);
   }
 
   /* ===== Sidebar (glass, collapsible) ===== */
@@ -453,6 +457,28 @@
     height: 100vh;
     overflow: hidden;
   }
+  /* Flex split: чат слева, блоки справа */
+  #view-new-project.blockly-open {
+    display: flex;
+    flex-direction: row;
+  }
+  .np-chat-side {
+    flex: 1 1 auto;
+    position: relative;
+    height: 100vh;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .np-blockly-side {
+    flex: 0 0 480px;
+    position: relative;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--grad-from);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
   /* Иконка как полупрозрачный водяной знак, центрирована */
   .np-watermark {
     position: absolute;
@@ -708,17 +734,8 @@
     font-size: 11px;
     padding: 6px 8px;
   }
-  /* Когда панель открыта — сдвигаем промпт-бар влево */
-  #view-new-project.pipeline-open .np-prompt-wrap,
-  #view-new-project.pipeline-open .project-header,
-  #view-new-project.pipeline-open .project-history {
-    right: 312px;
-  }
-  #view-new-project.blockly-open .np-prompt-wrap,
-  #view-new-project.blockly-open .project-header,
-  #view-new-project.blockly-open .project-history {
-    right: 520px;
-  }
+  /* (pipeline CSS убран — цепочка больше не нужна) */
+
 
   /* Кнопка-переключатель Blockly */
   .blockly-toggle {
@@ -742,29 +759,32 @@
     color: #c084fc;
   }
 
-  /* Правая панель Blockly */
-  .blockly-panel {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    width: 480px;
-    max-height: calc(100vh - 120px);
-    background: rgba(8, 8, 8, 0.8);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    z-index: 60;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+  .blocklySvg {
+    background-color: var(--grad-from) !important;
+  }
+  .blocklyMainBackground {
+    fill: var(--grad-from) !important;
+    fill-opacity: 1 !important;
+  }
+  .blocklyGrid line {
+    stroke: #333 !important;
+  }
+  .blocklyToolboxDiv {
+    background: var(--grad-to) !important;
+    border-top: 1px solid var(--border);
+  }
+  .blocklyFlyoutBackground {
+    fill: var(--grad-to) !important;
+    fill-opacity: 0.95 !important;
   }
   .blockly-panel-header {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 14px;
-    border-bottom: 1px solid var(--glass-border);
+    background: var(--grad-to);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
   }
   .blockly-panel-title {
     font-size: 13px;
@@ -786,20 +806,20 @@
   }
   .blockly-panel-run:hover { background: var(--accent-hover); }
   .blockly-panel-close {
-    width: 24px; height: 24px;
+    width: 28px; height: 28px;
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 18px;
+    font-size: 20px;
     cursor: pointer;
     border-radius: 4px;
+    flex: 0 0 auto;
   }
   .blockly-panel-close:hover { background: var(--glass); color: var(--text); }
   .blockly-container {
     flex: 1 1 auto;
-    height: calc(100vh - 200px);
-    min-height: 300px;
     overflow: hidden;
+    min-height: 200px;
   }
 
   /* AI-ответ — фиолетовый пузырь (слева, как terminal) */
@@ -1355,6 +1375,9 @@
 
   <!-- ===== View: Проект (prompt-style, dynamic) ===== -->
   <section id="view-new-project" class="view">
+
+    <!-- ЛЕВАЯ СТОРОНА: ЧАТ -->
+    <div class="np-chat-side" id="np-chat-side">
     <!-- Иконка-водяной знак (повёрнута -90deg, opacity 0.08) -->
     <div class="np-watermark" aria-hidden="true">
       <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1396,7 +1419,6 @@
       <div class="np-ai-bar">
         <button type="button" class="ai-toggle" id="ai-toggle">AI режим: ВЫКЛ</button>
         <span class="ai-status" id="ai-status">✗ не проверено</span>
-        <button type="button" class="pipeline-toggle" id="pipeline-toggle" title="Показать конструктор цепочки">🔗 Цепочка</button>
         <button type="button" class="blockly-toggle" id="blockly-toggle" title="Показать блоки">🧩 Блоки</button>
       </div>
       <div class="np-prompt-bar">
@@ -1413,63 +1435,59 @@
     <div class="np-divider"></div>
     <div class="np-status" id="np-status"></div>
 
-    <!-- Правая панель: конструктор цепочки -->
-    <div class="pipeline-panel" id="pipeline-panel" style="display:none;">
-      <div class="pipeline-panel-header">
-        <span class="pipeline-panel-title">🔗 Цепочка</span>
-        <button type="button" class="pipeline-panel-close" id="pipeline-panel-close">×</button>
-      </div>
-      <div class="pipeline-panel-body">
-        <div id="pipeline-nodes" class="pipeline-nodes">
-          <div class="pipeline-empty">Нет узлов.</div>
-        </div>
-        <div class="pipeline-add-row">
-          <button type="button" class="btn btn-ghost pipeline-add-btn" id="pipeline-add-ai">+ AI</button>
-          <button type="button" class="btn btn-ghost pipeline-add-btn" id="pipeline-add-vscode">+ VSCode</button>
-        </div>
-      </div>
-    </div>
+    </div><!-- /np-chat-side -->
 
-    <!-- Blockly панель (правая сторона) -->
-    <div class="blockly-panel" id="blockly-panel" style="display:none;">
+    <!-- ПРАВАЯ СТОРОНА: BLOCKLY -->
+    <div class="np-blockly-side" id="blockly-panel" style="display:none;">
       <div class="blockly-panel-header">
         <span class="blockly-panel-title">🧩 Блоки</span>
-        <button type="button" class="blockly-panel-run" id="blockly-run-btn">▶ Выполнить</button>
         <button type="button" class="blockly-panel-close" id="blockly-panel-close">×</button>
       </div>
       <div id="blockly-container" class="blockly-container">
         <div id="blockly-workspace" style="width:100%;height:100%;"></div>
       </div>
       <xml id="blockly-toolbox" style="display:none;">
-        <category name="Промпт" colour="#7034e8">
-          <block type="nezar_send_prompt"></block>
-          <block type="nezar_prompt_text"></block>
+        <category name="Промпт" colour="#63A9AC">
+          <block type="nezar_prompt"></block>
+          <block type="nezar_text"></block>
+          <block type="nezar_join">
+            <value name="A"><shadow type="nezar_text"></shadow></value>
+            <value name="B"><shadow type="nezar_text"></shadow></value>
+          </block>
         </category>
-        <category name="Текст" colour="#5b80a5">
-          <block type="text"></block>
-          <block type="text_join"></block>
-          <block type="text_length"></block>
-          <block type="text_print"></block>
+        <category name="Действия" colour="#5757FF">
+          <block type="nezar_send_deepseek">
+            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
+            <value name="URL"><shadow type="nezar_text"><field name="TEXT">https://chat.deepseek.com</field></shadow></value>
+            <value name="VAR"><shadow type="nezar_text"><field name="TEXT">ai_result</field></shadow></value>
+          </block>
+          <block type="nezar_send_vscode">
+            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
+          </block>
+          <block type="nezar_print">
+            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
+          </block>
         </category>
-        <category name="Логика" colour="#5b80a5">
-          <block type="controls_if"></block>
-          <block type="logic_compare"></block>
-          <block type="logic_operation"></block>
-          <block type="logic_negate"></block>
-          <block type="logic_boolean"></block>
+        <category name="Навыки" colour="#9B59B6">
+          <block type="nezar_skill">
+            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">мой_навык</field></shadow></value>
+          </block>
+          <block type="nezar_call_skill">
+            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">мой_навык</field></shadow></value>
+          </block>
         </category>
-        <category name="Математика" colour="#5b67a5">
-          <block type="math_number"></block>
-          <block type="math_arithmetic"></block>
-          <block type="math_random_int"></block>
+        <category name="Переменные" colour="#a55b80">
+          <block type="nezar_set_var">
+            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">result</field></shadow></value>
+            <value name="VALUE"><shadow type="nezar_text"></shadow></value>
+          </block>
+          <block type="nezar_get_var">
+            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">result</field></shadow></value>
+          </block>
         </category>
-        <category name="Циклы" colour="#5ba55b">
-          <block type="controls_repeat_ext"></block>
-          <block type="controls_whileUntil"></block>
-        </category>
-        <category name="Переменные" custom="VARIABLE" colour="#a55b80"></category>
       </xml>
-    </div>
+    </div><!-- /np-blockly-side -->
+
   </section>
 
   <!-- ===== View: Workspace ===== -->

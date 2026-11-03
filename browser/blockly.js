@@ -1,207 +1,264 @@
 /*
  * blockly.js — Blockly workspace для NEZAR.
- *
- * Прямой интерпретатор блоков — без eval/new Function (MV3 CSP запрещает).
- * Обходим дерево блоков Blockly и выполняем каждый тип напрямую.
- *
- * Кастомные блоки:
- *   - nezar_send_prompt: отправляет текст в Firebase → VSCode терминал
- *   - nezar_prompt_text: текстовое поле для промпта
+ * Все слоты — квадратные (String type). Никаких круглых (Number) блоков.
  */
 
 let blocklyWorkspace = null;
 let blocklyInitialized = false;
-let blocklyVariables = {}; // хранилище переменных для блоков
+let blocklyVariables = {};
+let blocklySkills = {};
+let blocklyPromptText = '';
+let blocklyVscodeOutput = '';
 
 // ============================================================
-// Кастомные блоки (только определения, без генератора кода)
+// Блоки — все output/inputs только String (квадратная форма)
 // ============================================================
 
 Blockly.defineBlocksWithJsonArray([
   {
-    "type": "nezar_send_prompt",
-    "message0": "отправить промпт %1",
+    "type": "nezar_prompt",
+    "message0": "ПРОМПТ",
+    "output": "String",
+    "colour": "#63A9AC",
+    "tooltip": "Текст из поля ввода чата"
+  },
+  {
+    "type": "nezar_text",
+    "message0": "текст %1",
+    "args0": [
+      { "type": "field_input", "name": "TEXT", "text": "" }
+    ],
+    "output": "String",
+    "colour": "#5b80a5",
+    "tooltip": "Текст. Можно заменить на промпт или переменную."
+  },
+  {
+    "type": "nezar_join",
+    "message0": "%1 + %2",
+    "args0": [
+      { "type": "input_value", "name": "A", "check": "String" },
+      { "type": "input_value", "name": "B", "check": "String" }
+    ],
+    "output": "String",
+    "colour": "#E37B7D",
+    "tooltip": "Объединяет два текста"
+  },
+  {
+    "type": "nezar_get_var",
+    "message0": "переменная %1",
+    "args0": [
+      { "type": "field_input", "name": "NAME", "text": "result" }
+    ],
+    "output": "String",
+    "colour": "#a55b80",
+    "tooltip": "Получить значение переменной по имени"
+  },
+  {
+    "type": "nezar_send_deepseek",
+    "message0": "запрос к deepseek %1 вкладка %2 ответ в %3",
+    "args0": [
+      { "type": "input_value", "name": "TEXT", "check": "String" },
+      { "type": "input_value", "name": "URL", "check": "String" },
+      { "type": "input_value", "name": "VAR", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#5757FF",
+    "tooltip": "Запрос в DeepSeek. Ответ в переменную."
+  },
+  {
+    "type": "nezar_send_vscode",
+    "message0": "выполнить vscode %1",
     "args0": [
       { "type": "input_value", "name": "TEXT", "check": "String" }
     ],
     "previousStatement": null,
     "nextStatement": null,
-    "colour": "#7034e8",
-    "tooltip": "Отправляет текст в Firebase → VSCode терминал"
+    "colour": "#67FECC",
+    "tooltip": "Выполнить команду в VSCode терминале"
   },
   {
-    "type": "nezar_prompt_text",
-    "message0": "промпт: %1",
+    "type": "nezar_skill",
+    "message0": "навык %1 %2",
     "args0": [
-      { "type": "field_input", "name": "TEXT", "text": "echo Привет из блоков" }
+      { "type": "input_value", "name": "NAME", "check": "String" },
+      { "type": "input_statement", "name": "DO" }
     ],
-    "output": "String",
-    "colour": "#7034e8",
-    "tooltip": "Текст промпта"
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#9B59B6",
+    "tooltip": "Определяет навык (функцию)"
+  },
+  {
+    "type": "nezar_call_skill",
+    "message0": "вызов скила %1",
+    "args0": [
+      { "type": "input_value", "name": "NAME", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#8E44AD",
+    "tooltip": "Вызывает навык по имени"
+  },
+  {
+    "type": "nezar_print",
+    "message0": "вывести в чат %1",
+    "args0": [
+      { "type": "input_value", "name": "TEXT", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#34495E",
+    "tooltip": "Добавляет текст в чат"
+  },
+  {
+    "type": "nezar_set_var",
+    "message0": "установить %1 = %2",
+    "args0": [
+      { "type": "input_value", "name": "NAME", "check": "String" },
+      { "type": "input_value", "name": "VALUE", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#a55b80",
+    "tooltip": "Сохранить значение в переменную"
   }
 ]);
 
 // ============================================================
-// nezarSendPrompt — полная отправка промпта
+// Функции отправки
 // ============================================================
 
-async function nezarSendPrompt(text) {
-  console.log('[nezar-blockly] sendPrompt:', text);
-  if (!activeProject || !isConfigured()) {
-    console.log('[nezar-blockly] нет проекта или Firebase не настроен');
+async function nezarSendToDeepSeek(text, url, varName) {
+  console.log('[nezar-blockly] DeepSeek:', text.slice(0, 60), '→ var:', varName);
+  const tabResp = await chrome.runtime.sendMessage({ action: 'find_tab_by_url', url: url });
+  if (!tabResp || !tabResp.ok) {
+    blocklyVariables[varName] = '(вкладка не найдена)';
     return;
   }
+  const sendResp = await chrome.runtime.sendMessage({
+    action: 'send_to_specific_tab',
+    tabId: tabResp.tabId,
+    text: text,
+    site: tabResp.site,
+  });
+  if (!sendResp || !sendResp.ok) {
+    blocklyVariables[varName] = '(ошибка отправки)';
+    return;
+  }
+  const aiResp = await waitForAIResponse(90000);
+  if (aiResp && aiResp.text) {
+    blocklyVariables[varName] = aiResp.text;
+  } else {
+    blocklyVariables[varName] = '(таймаут AI)';
+  }
+}
+
+async function nezarSendToVSCode(text) {
+  if (!activeProject || !isConfigured()) return;
   const requestId = generateRequestId();
   const now = Date.now();
-  await addHistoryEntry({ role: "user", text: text, timestamp: now, status: "ok", requestId });
-  await postRecord({ text: text, timestamp: now, source: "blockly", requestId });
+  await addHistoryEntry({ role: 'user', text: text, timestamp: now, status: 'ok', requestId });
+  await postRecord({ text: text, timestamp: now, source: 'blockly', requestId });
   const response = await waitForResponse(requestId, 60000);
   if (response) {
+    blocklyVscodeOutput = response.output || '(нет вывода)';
     const exitCode = response.exitCode;
-    const hasError = response.error || (typeof exitCode === "number" && exitCode !== 0);
-    await addHistoryEntry({ role: "assistant", text: response.output || "(нет вывода)", timestamp: response.timestamp || Date.now(), status: hasError ? "err" : "ok", exitCode, error: response.error, requestId });
+    const hasError = response.error || (typeof exitCode === 'number' && exitCode !== 0);
+    await addHistoryEntry({
+      role: 'assistant',
+      text: response.output || '(нет вывода)',
+      timestamp: response.timestamp || Date.now(),
+      status: hasError ? 'err' : 'ok',
+      exitCode,
+      error: response.error,
+      requestId,
+    });
   } else {
-    await addHistoryEntry({ role: "assistant", text: "(таймаут)", timestamp: Date.now(), status: "err", error: "timeout", requestId });
+    blocklyVscodeOutput = '(таймаут)';
+    await addHistoryEntry({ role: 'assistant', text: '(таймаут)', timestamp: Date.now(), status: 'err', requestId });
   }
 }
 
 // ============================================================
-// Прямой интерпретатор блоков — без eval (CSP-совместимо)
+// Интерпретатор
 // ============================================================
 
-// Вычисляет value-блок (возвращает значение)
 function evalBlock(block) {
   if (!block) return '';
   const t = block.type;
+  console.log('[nezar-blockly] evalBlock:', t);
 
-  if (t === 'text' || t === 'nezar_prompt_text') return block.getFieldValue('TEXT') || '';
-  if (t === 'math_number') return parseFloat(block.getFieldValue('NUM')) || 0;
-  if (t === 'logic_boolean') return block.getFieldValue('BOOL') === 'TRUE';
-  if (t === 'logic_null') return null;
-
-  if (t === 'text_join') {
-    let r = '';
-    for (let i = 0; ; i++) {
-      const inp = block.getInput('ADD' + i);
-      if (!inp) break;
-      r += String(evalBlock(inp.connection && inp.connection.targetBlock()));
-    }
-    return r;
+  if (t === 'nezar_prompt') return blocklyPromptText;
+  if (t === 'nezar_text') return block.getFieldValue('TEXT') || '';
+  if (t === 'nezar_join') {
+    return String(evalBlock(block.getInputTargetBlock('A'))) + String(evalBlock(block.getInputTargetBlock('B')));
   }
-  if (t === 'text_length') return String(evalBlock(block.getInputTargetBlock('VALUE'))).length;
-  if (t === 'math_arithmetic') {
-    const a = evalBlock(block.getInputTargetBlock('A'));
-    const b = evalBlock(block.getInputTargetBlock('B'));
-    const op = block.getFieldValue('OP');
-    if (op === 'ADD') return a + b;
-    if (op === 'MINUS') return a - b;
-    if (op === 'MULTIPLY') return a * b;
-    if (op === 'DIVIDE') return b !== 0 ? a / b : 0;
-    if (op === 'POWER') return Math.pow(a, b);
-    return 0;
-  }
-  if (t === 'math_random_int') {
-    const from = evalBlock(block.getInputTargetBlock('FROM'));
-    const to = evalBlock(block.getInputTargetBlock('TO'));
-    return Math.floor(Math.random() * (to - from + 1)) + from;
-  }
-  if (t === 'math_modulo') {
-    const a = evalBlock(block.getInputTargetBlock('DIVIDEND'));
-    const b = evalBlock(block.getInputTargetBlock('DIVISOR'));
-    return b !== 0 ? a % b : 0;
-  }
-  if (t === 'logic_compare') {
-    const a = evalBlock(block.getInputTargetBlock('A'));
-    const b = evalBlock(block.getInputTargetBlock('B'));
-    const op = block.getFieldValue('OP');
-    if (op === 'EQ') return a == b;
-    if (op === 'NEQ') return a != b;
-    if (op === 'LT') return a < b;
-    if (op === 'LTE') return a <= b;
-    if (op === 'GT') return a > b;
-    if (op === 'GTE') return a >= b;
-    return false;
-  }
-  if (t === 'logic_operation') {
-    const a = evalBlock(block.getInputTargetBlock('A'));
-    const b = evalBlock(block.getInputTargetBlock('B'));
-    const op = block.getFieldValue('OP');
-    if (op === 'AND') return a && b;
-    if (op === 'OR') return a || b;
-    return false;
-  }
-  if (t === 'logic_negate') return !evalBlock(block.getInputTargetBlock('BOOL'));
-  if (t === 'variables_get') {
-    const v = block.workspace.getVariableById(block.getFieldValue('VAR'));
-    return v ? (blocklyVariables[v.name] !== undefined ? blocklyVariables[v.name] : '') : '';
-  }
-  if (t === 'variables_set') {
-    const v = block.workspace.getVariableById(block.getFieldValue('VAR'));
-    const val = evalBlock(block.getInputTargetBlock('VALUE'));
-    if (v) blocklyVariables[v.name] = val;
+  if (t === 'nezar_get_var') {
+    const nameBlock = block.getInputTargetBlock('NAME');
+    const name = nameBlock ? String(evalBlock(nameBlock)) : (block.getFieldValue('NAME') || '');
+    const val = String(blocklyVariables[name] || '');
+    console.log('[nezar-blockly] get_var name=' + name + ' val=' + val.slice(0, 60));
     return val;
   }
-  if (t === 'text_print') {
-    const val = evalBlock(block.getInputTargetBlock('TEXT'));
-    console.log('[nezar-blockly] print:', val);
-    return '';
-  }
 
-  console.warn('[nezar-blockly] unknown value block:', t);
+  console.warn('[nezar-blockly] evalBlock unknown:', t);
   return '';
 }
 
-// Выполняет statement-блок (возвращает async)
 async function execBlock(block) {
   if (!block) return;
   const t = block.type;
+  console.log('[nezar-blockly] execBlock:', t);
 
-  if (t === 'nezar_send_prompt') {
-    const text = evalBlock(block.getInputTargetBlock('TEXT'));
-    await nezarSendPrompt(String(text));
-  } else if (t === 'variables_set') {
-    evalBlock(block); // variables_set обрабатывается в evalBlock
-  } else if (t === 'text_print') {
-    evalBlock(block);
-  } else if (t === 'controls_if') {
-    // Обрабатываем все ветки if/elseif/else
-    let i = 0;
-    while (true) {
-      const ifInput = block.getInput('IF' + i);
-      if (!ifInput) break;
-      const condition = evalBlock(ifInput.connection && ifInput.connection.targetBlock());
-      if (condition) {
-        const doBlock = block.getInputTargetBlock('DO' + i);
-        await execChain(doBlock);
-        return;
-      }
-      i++;
+  // Универсальный читатель String из input_value слота
+  const readStr = (inputName) => {
+    const b = block.getInputTargetBlock(inputName);
+    if (!b) { console.log('[nezar-blockly] readStr ' + inputName + ': NULL (нет блока)'); return ''; }
+    const val = String(evalBlock(b));
+    console.log('[nezar-blockly] readStr ' + inputName + ': "' + val.slice(0, 80) + '"');
+    return val;
+  };
+
+  if (t === 'nezar_send_deepseek') {
+    const text = readStr('TEXT');
+    const url = readStr('URL');
+    const varName = readStr('VAR');
+    console.log('[nezar-blockly] → DeepSeek text=' + text.slice(0,60) + ' url=' + url + ' var=' + varName);
+    await nezarSendToDeepSeek(text, url, varName);
+  } else if (t === 'nezar_send_vscode') {
+    const text = readStr('TEXT');
+    console.log('[nezar-blockly] → VSCode text=' + text.slice(0,60));
+    await nezarSendToVSCode(text);
+  } else if (t === 'nezar_print') {
+    const text = readStr('TEXT');
+    if (activeProject) {
+      await addHistoryEntry({ role: 'ai', text: text, timestamp: Date.now(), status: 'ok', nodeName: 'blockly' });
     }
-    // else
-    const elseBlock = block.getInputTargetBlock('ELSE');
-    if (elseBlock) await execChain(elseBlock);
-  } else if (t === 'controls_repeat_ext') {
-    const times = evalBlock(block.getInputTargetBlock('TIMES'));
+  } else if (t === 'nezar_set_var') {
+    const name = readStr('NAME');
+    const val = readStr('VALUE');
+    blocklyVariables[name] = val;
+    console.log('[nezar-blockly] set_var ' + name + ' = "' + val.slice(0,60) + '"');
+  } else if (t === 'nezar_skill') {
+    const name = readStr('NAME');
     const doBlock = block.getInputTargetBlock('DO');
-    for (let i = 0; i < times; i++) {
+    blocklySkills[name] = doBlock;
+    console.log('[nezar-blockly] skill defined: ' + name);
+  } else if (t === 'nezar_call_skill') {
+    const name = readStr('NAME');
+    const doBlock = blocklySkills[name];
+    if (doBlock) {
+      console.log('[nezar-blockly] calling skill: ' + name);
       await execChain(doBlock);
-    }
-  } else if (t === 'controls_whileUntil') {
-    const mode = block.getFieldValue('MODE');
-    const condBlock = block.getInputTargetBlock('BOOL');
-    const doBlock = block.getInputTargetBlock('DO');
-    let safety = 0;
-    if (mode === 'WHILE') {
-      while (evalBlock(condBlock) && safety < 1000) { await execChain(doBlock); safety++; }
     } else {
-      while (!evalBlock(condBlock) && safety < 1000) { await execChain(doBlock); safety++; }
+      console.warn('[nezar-blockly] skill NOT FOUND: ' + name);
     }
   } else {
-    console.warn('[nezar-blockly] unknown statement block:', t);
+    console.warn('[nezar-blockly] execBlock unknown:', t);
   }
 }
 
-// Выполняет цепочку statement-блоков (connected via next)
 async function execChain(block) {
   while (block) {
     await execBlock(block);
@@ -210,26 +267,59 @@ async function execChain(block) {
 }
 
 // ============================================================
-// Выполнение всех блоков в workspace
+// Запуск
 // ============================================================
 
-async function runBlockly() {
+async function runBlockly(promptText) {
   if (!blocklyWorkspace) {
-    console.log('[nezar-blockly] workspace not initialized');
-    return;
+    console.log('[nezar-blockly] runBlockly: workspace NULL — trying init');
+    initBlockly();
+    if (!blocklyWorkspace) {
+      console.log('[nezar-blockly] runBlockly: init failed, abort');
+      return false;
+    }
   }
-  blocklyVariables = {}; // сброс переменных
-  const topBlocks = blocklyWorkspace.getTopBlocks(true);
-  console.log('[nezar-blockly] running ' + topBlocks.length + ' top block(s)');
+  blocklyVariables = {};
+  blocklySkills = {};
+  blocklyPromptText = promptText || '';
+  blocklyVscodeOutput = '';
 
-  for (const block of topBlocks) {
-    await execChain(block);
+  const topBlocks = blocklyWorkspace.getTopBlocks(true);
+  console.log('[nezar-blockly] runBlockly: topBlocks=' + topBlocks.length, topBlocks.map(b => b.type));
+  if (topBlocks.length === 0) {
+    console.log('[nezar-blockly] runBlockly: no blocks, abort');
+    return false;
   }
-  console.log('[nezar-blockly] execution complete');
+
+  console.log('[nezar-blockly] running, prompt="' + promptText.slice(0, 60) + '"');
+
+  if (promptText && activeProject) {
+    await addHistoryEntry({ role: 'user', text: promptText, timestamp: Date.now(), status: 'ok', requestId: 'blockly_' + Date.now() });
+  }
+
+  try {
+    for (const block of topBlocks) {
+      await execChain(block);
+    }
+    console.log('[nezar-blockly] done OK');
+  } catch (err) {
+    console.error('[nezar-blockly] runBlockly ERROR:', err.message, err.stack);
+  }
+  return true;
+}
+
+function hasBlocks() {
+  if (!blocklyWorkspace) {
+    console.log('[nezar-blockly] hasBlocks: workspace is NULL');
+    return false;
+  }
+  const blocks = blocklyWorkspace.getTopBlocks(false);
+  console.log('[nezar-blockly] hasBlocks: topBlocks=' + blocks.length, blocks.map(b => b.type));
+  return blocks.length > 0;
 }
 
 // ============================================================
-// Инициализация Blockly workspace
+// Инициализация
 // ============================================================
 
 function initBlockly() {
@@ -245,6 +335,8 @@ function initBlockly() {
     blocklyWorkspace = Blockly.inject(workspaceDiv, {
       toolbox: toolbox,
       renderer: 'zelos',
+      horizontalLayout: true,
+      toolboxPosition: 'end',
       move: { scrollbars: { horizontal: true, vertical: true }, drag: true, wheel: true },
       zoom: { controls: true, wheel: true, startScale: 0.85, maxScale: 2, minScale: 0.3 },
       grid: { spacing: 20, length: 1, colour: 'rgba(255,255,255,0.05)', snap: false },
@@ -256,15 +348,11 @@ function initBlockly() {
         Blockly.svgResize(blocklyWorkspace);
       }
     });
-    console.log('[nezar-blockly] workspace initialized');
+    console.log('[nezar-blockly] initialized');
   } catch (err) {
     console.error('[nezar-blockly] init error:', err);
   }
 }
-
-// ============================================================
-// Toggle панели
-// ============================================================
 
 function toggleBlocklyPanel() {
   const panel = document.getElementById('blockly-panel');
@@ -284,32 +372,10 @@ function toggleBlocklyPanel() {
   }
 }
 
-// ============================================================
-// Сохранение/загрузка состояния блоков
-// ============================================================
-
-function saveBlocklyState() {
-  if (!blocklyWorkspace) return null;
-  try { return JSON.stringify(Blockly.serialization.workspaces.save(blocklyWorkspace)); }
-  catch (e) { return null; }
-}
-
-function loadBlocklyState(jsonStr) {
-  if (!blocklyWorkspace || !jsonStr) return;
-  try { Blockly.serialization.workspaces.load(JSON.parse(jsonStr), blocklyWorkspace); }
-  catch (e) { console.error('[nezar-blockly] load error:', e); }
-}
-
-// ============================================================
-// Events
-// ============================================================
-
 (function() {
   const toggleBtn = document.getElementById('blockly-toggle');
   const closeBtn = document.getElementById('blockly-panel-close');
-  const runBtn = document.getElementById('blockly-run-btn');
   if (toggleBtn) toggleBtn.addEventListener('click', toggleBlocklyPanel);
   if (closeBtn) closeBtn.addEventListener('click', toggleBlocklyPanel);
-  if (runBtn) runBtn.addEventListener('click', runBlockly);
   console.log('[nezar-blockly] events wired');
 })();
