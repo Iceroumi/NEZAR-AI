@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebase Bridge</title>
+<link rel="icon" type="image/png" href="icons/icon128.png" />
+<link rel="icon" type="image/png" sizes="48x48" href="icons/icon48.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png" />
+<style>
+  :root {
+    /* Палитра из вашего дизайна */
+    --grad-from: #080808;
+    --grad-to: #395F7B;
+    --glass: rgba(255, 255, 255, 0.05);
+    --glass-strong: rgba(255, 255, 255, 0.08);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --text: #E5E5E5;
+    --text-dim: rgba(229, 229, 229, 0.6);
+    --text-mute: rgba(229, 229, 229, 0.3);
+    --green: #019A5A;
+    --green-soft: rgba(1, 154, 90, 0.7);
+    --green-soft-2: rgba(1, 154, 90, 0.8);
+    --green-shadow: rgba(1, 154, 90, 0.25);
+    --success: #4caf50;
+    --error: #f44336;
+    --warn: #ff9800;
+    --radius-lg: 16px;
+    --radius-md: 10px;
+    --radius-sm: 7px;
+    --sidebar-w: 240px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    color: var(--text);
+    font-size: 14px;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    /* Градиент-фон из вашего дизайна */
+    background: linear-gradient(180deg, var(--grad-from) 0%, var(--grad-to) 100%);
+  }
+
+  /* ===== Sidebar (glass, collapsible) ===== */
+  .sidebar {
+    flex: 0 0 var(--sidebar-w);
+    overflow: hidden;
+    transition: flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.2s ease;
+  }
+  body.sidebar-collapsed .sidebar {
+    flex-basis: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Внутренний контейнер фиксирует ширину, чтобы при сворачивании
+     содержимое не сжималось, а аккуратно обрезалось. */
+  .sidebar-inner {
+    width: var(--sidebar-w);
+    height: 100vh;
+    background: rgba(8, 8, 8, 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-right: 1px solid var(--glass-border);
+    display: flex;
+    flex-direction: column;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 14px 20px 18px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .brand .logo {
+    width: 32px;
+    height: 32px;
+    background: var(--green-soft);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    flex: 0 0 auto;
+    box-shadow: 0 4px 12px var(--green-shadow);
+  }
+  .brand .logo svg { width: 100%; height: 100%; display: block; }
+  .brand .titles {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .brand .title {
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.2;
+  }
+  .brand .subtitle {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  /* Кнопка сворачивания в шапке сайдбара */
+  .sidebar-collapse-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .sidebar-collapse-btn:hover {
+    background: var(--glass);
+    color: var(--text);
+  }
+  .sidebar-collapse-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Плавающая кнопка разворачивания (видна только когда сайдбар свёрнут) */
+  .sidebar-expand-btn {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 100;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    color: var(--text);
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .sidebar-expand-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.05);
+  }
+  .sidebar-expand-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  body.sidebar-collapsed .sidebar-expand-btn {
+    display: flex;
+  }
+
+  nav.nav {
+    padding: 16px 10px;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    margin-bottom: 4px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .nav-item:hover {
+    background: var(--glass);
+    color: var(--text);
+  }
+  .nav-item.active {
+    background: var(--green-soft);
+    color: #fff;
+    box-shadow: 0 4px 12px var(--green-shadow);
+  }
+  .nav-item .ico {
+    font-size: 18px;
+    width: 20px;
+    text-align: center;
+    flex: 0 0 auto;
+  }
+  .nav-item .label {
+    flex: 1 1 auto;
+  }
+
+  .sidebar-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--glass-border);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .sidebar-footer .conn-label { color: var(--text-mute); margin-bottom: 4px; }
+  .sidebar-footer .conn-value {
+    color: var(--text);
+    word-break: break-all;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+  }
+  .sidebar-footer .conn-value.ok { color: var(--success); }
+  .sidebar-footer .conn-value.err { color: var(--error); }
+
+  /* ===== Content area ===== */
+  .content {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    position: relative;
+  }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ===== Settings & Workspace shared styles ===== */
+  .padded-view {
+    padding: 48px 56px;
+    max-width: 920px;
+  }
+  .padded-view h1 {
+    font-size: 26px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+  }
+  .padded-view .lead {
+    color: var(--text-dim);
+    margin: 0 0 32px;
+    font-size: 14px;
+  }
+  .padded-view h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 36px 0 14px;
+  }
+
+  /* Glass cards */
+  .glass-card {
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+  }
+
+  /* Form fields */
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  .field .hint {
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-top: 6px;
+  }
+  .field input[type="text"],
+  .field input[type="password"],
+  .field textarea {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .field input::placeholder,
+  .field textarea::placeholder {
+    color: var(--text-mute);
+  }
+  .field input:focus,
+  .field textarea:focus {
+    border-color: var(--green);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Buttons */
+  .btn {
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 12px 22px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+  .btn-primary {
+    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
+    color: #fff;
+    box-shadow: 0 4px 12px var(--green-shadow);
+  }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px var(--green-shadow);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-ghost {
+    background: var(--glass);
+    color: var(--text-dim);
+    border: 1px solid var(--glass-border);
+  }
+  .btn-ghost:hover {
+    background: var(--glass-strong);
+    color: var(--text);
+  }
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .btn-row .btn-primary { min-width: 160px; }
+
+  /* Status messages */
+  .status-line {
+    font-size: 13px;
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    background: var(--glass);
+    color: var(--text-dim);
+    display: none;
+    border: 1px solid var(--glass-border);
+  }
+  .status-line.show { display: block; }
+  .status-line.ok {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--success);
+    border-color: rgba(76, 175, 80, 0.3);
+  }
+  .status-line.err {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--error);
+    border-color: rgba(244, 67, 54, 0.3);
+  }
+  .status-line.warn {
+    background: rgba(255, 152, 0, 0.1);
+    color: var(--warn);
+    border-color: rgba(255, 152, 0, 0.3);
+  }
+
+  /* Workspace textarea */
+  .workspace-textarea {
+    width: 100%;
+    min-height: 140px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    font-size: 14px;
+    font-family: "SF Mono", Menlo, Consolas, "Cascadia Code", monospace;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s ease;
+  }
+  .workspace-textarea:focus { border-color: var(--green); }
+  .workspace-textarea::placeholder { color: var(--text-mute); }
+
+  .kbd-hint {
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-top: 10px;
+  }
+  .kbd {
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+  }
+
+  /* History list */
+  .history {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    max-height: 360px;
+    overflow-y: auto;
+  }
+  .history-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--glass-border);
+    font-size: 13px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-item .time {
+    flex: 0 0 auto;
+    color: var(--text-mute);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+  }
+  .history-item .text {
+    flex: 1 1 auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    word-break: break-all;
+  }
+  .history-item .status-pill {
+    flex: 0 0 auto;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--success);
+    color: #fff;
+    font-weight: 500;
+  }
+  .history-item .status-pill.err { background: var(--error); }
+  .history-empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-mute);
+    font-size: 13px;
+  }
+
+  /* ============================================================
+     NEW PROJECT view — дизайн из вашего CSS
+     ============================================================ */
+  #view-new-project {
+    position: relative;
+    height: 100vh;
+    overflow: hidden;
+  }
+  /* Иконка как полупрозрачный водяной знак, центрирована */
+  .np-watermark {
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    left: 50%;
+    top: 42%;
+    transform: translate(-50%, -50%) rotate(-90deg);
+    opacity: 0.08;
+    pointer-events: none;
+  }
+  .np-watermark svg { width: 100%; height: 100%; display: block; }
+
+  /* Заголовок над промптом */
+  .np-header {
+    position: absolute;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    z-index: 2;
+  }
+  .np-header h1 {
+    font-size: 32px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    letter-spacing: -0.5px;
+  }
+  .np-header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  /* Контейнер промпта — прижат к низу */
+  .np-prompt-wrap {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 719px;
+    max-width: calc(100% - 80px);
+    z-index: 2;
+  }
+
+  /* Стеклянная панель промпта */
+  .np-prompt-bar {
+    box-sizing: border-box;
+    height: 56px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    padding: 6px 6px 6px 20px;
+    gap: 12px;
+    transition: border-color 0.15s ease;
+  }
+  .np-prompt-bar:focus-within {
+    border-color: var(--green-soft);
+  }
+  .np-prompt-bar input {
+    flex: 1 1 auto;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 500;
+    font-family: 'Inter', inherit;
+    line-height: 150%;
+    height: 100%;
+  }
+  .np-prompt-bar input::placeholder {
+    color: var(--text-mute);
+  }
+
+  /* Зелёная кнопка отправки 44×44 */
+  .np-send-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
+    box-shadow: 0 4px 4px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .np-send-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 12px var(--green-shadow);
+  }
+  .np-send-btn:active {
+    transform: translateY(0);
+  }
+  .np-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .np-send-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Тонкая линия под баром */
+  .np-divider {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 32px;
+    width: 314px;
+    height: 1px;
+    background: var(--glass-border);
+  }
+
+  /* Статус под промптом */
+  .np-status {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    z-index: 3;
+    width: 719px;
+    max-width: calc(100% - 80px);
+  }
+  .np-status.ok { color: var(--success); }
+  .np-status.err { color: var(--error); }
+
+  /* AI-режим: переключатель + статус над промпт-баром */
+  .np-ai-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 0 4px;
+  }
+  .ai-toggle {
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    color: var(--text-dim);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .ai-toggle:hover {
+    background: var(--glass-strong);
+    color: var(--text);
+  }
+  .ai-toggle.on {
+    background: rgba(138, 43, 226, 0.2);
+    border-color: rgba(138, 43, 226, 0.5);
+    color: #c084fc;
+  }
+  .ai-status {
+    font-size: 11px;
+    color: var(--text-mute);
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ai-status.ok { color: var(--success); }
+  .ai-status.err { color: var(--error); }
+
+  /* Кнопка-переключатель цепочки */
+  .pipeline-toggle {
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    color: var(--text-dim);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    flex: 0 0 auto;
+  }
+  .pipeline-toggle:hover { background: var(--glass-strong); color: var(--text); }
+  .pipeline-toggle.active {
+    background: rgba(138, 43, 226, 0.2);
+    border-color: rgba(138, 43, 226, 0.5);
+    color: #c084fc;
+  }
+
+  /* Правая панель конструктора цепочки */
+  .pipeline-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 280px;
+    max-height: calc(100vh - 120px);
+    background: rgba(8, 8, 8, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .pipeline-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .pipeline-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #c084fc;
+  }
+  .pipeline-panel-close {
+    width: 24px; height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .pipeline-panel-close:hover { background: var(--glass); color: var(--text); }
+  .pipeline-panel-body {
+    padding: 10px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+  }
+  .pipeline-add-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .pipeline-add-btn {
+    flex: 1;
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+  /* Когда панель открыта — сдвигаем промпт-бар влево */
+  #view-new-project.pipeline-open .np-prompt-wrap,
+  #view-new-project.pipeline-open .project-header,
+  #view-new-project.pipeline-open .project-history {
+    right: 312px;
+  }
+  #view-new-project.blockly-open .np-prompt-wrap,
+  #view-new-project.blockly-open .project-header,
+  #view-new-project.blockly-open .project-history {
+    right: 520px;
+  }
+
+  /* Кнопка-переключатель Blockly */
+  .blockly-toggle {
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    color: var(--text-dim);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    flex: 0 0 auto;
+  }
+  .blockly-toggle:hover { background: var(--glass-strong); color: var(--text); }
+  .blockly-toggle.active {
+    background: rgba(112, 52, 232, 0.2);
+    border-color: rgba(112, 52, 232, 0.5);
+    color: #c084fc;
+  }
+
+  /* Правая панель Blockly */
+  .blockly-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 480px;
+    max-height: calc(100vh - 120px);
+    background: rgba(8, 8, 8, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .blockly-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .blockly-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #c084fc;
+    flex: 0 0 auto;
+  }
+  .blockly-panel-run {
+    flex: 1 1 auto;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .blockly-panel-run:hover { background: var(--accent-hover); }
+  .blockly-panel-close {
+    width: 24px; height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .blockly-panel-close:hover { background: var(--glass); color: var(--text); }
+  .blockly-container {
+    flex: 1 1 auto;
+    height: calc(100vh - 200px);
+    min-height: 300px;
+    overflow: hidden;
+  }
+
+  /* AI-ответ — фиолетовый пузырь (слева, как terminal) */
+  .ph-item.role-ai {
+    margin-right: auto;
+    background: rgba(138, 43, 226, 0.08);
+    border-color: rgba(138, 43, 226, 0.3);
+    border-left: 3px solid #8a2be2;
+    border-top-left-radius: 2px;
+    border-bottom-left-radius: 2px;
+  }
+  .ph-item.role-ai .ph-role { color: #c084fc; }
+
+  /* Индикатор "AI думает..." — три прыгающих точки */
+  .processing-indicator {
+    margin-right: auto;
+    background: rgba(138, 43, 226, 0.08);
+    border-color: rgba(138, 43, 226, 0.3);
+    border-left: 3px solid #8a2be2;
+  }
+  .processing-indicator .ph-pill {
+    background: rgba(138, 43, 226, 0.3);
+    color: #c084fc;
+    animation: pulse-pill 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-pill {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .typing-dots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .typing-dots span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c084fc;
+    animation: typing-bounce 1.4s ease-in-out infinite;
+  }
+  .typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes typing-bounce {
+    0%, 60%, 100% {
+      transform: translateY(0);
+      opacity: 0.4;
+    }
+    30% {
+      transform: translateY(-8px);
+      opacity: 1;
+    }
+  }
+  .typing-text {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+  /* ===== Projects list in sidebar ===== */
+  .projects-section {
+    padding: 4px 10px 8px;
+  }
+  .projects-header {
+    font-size: 10px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 12px 8px 6px;
+    font-weight: 600;
+  }
+  .projects-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .projects-list::-webkit-scrollbar { width: 4px; }
+  .projects-list::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 2px; }
+
+  .project-item {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 2px;
+    border-radius: var(--radius-md);
+    transition: background 0.12s ease;
+  }
+  .project-item:hover { background: var(--glass); }
+  .project-item.active { background: var(--green-soft); }
+  .project-item.active .project-name { color: #fff; }
+  .project-item.active .project-delete { color: rgba(255,255,255,0.6); }
+  .project-item.active .project-delete:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+  .project-name {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 9px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .project-name .proj-ico {
+    flex: 0 0 auto;
+    font-size: 13px;
+    opacity: 0.7;
+  }
+  .project-name .proj-name-text {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .project-rename-input {
+    flex: 1 1 auto;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--green);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 2px 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    min-width: 0;
+  }
+  .project-delete {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-mute);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 18px;
+    line-height: 1;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .project-item:hover .project-delete { display: flex; }
+  .project-delete:hover {
+    background: rgba(244, 67, 54, 0.25);
+    color: var(--error);
+  }
+  .projects-empty {
+    padding: 14px 12px;
+    font-size: 12px;
+    color: var(--text-mute);
+    font-style: italic;
+  }
+  .nav-divider {
+    height: 1px;
+    background: var(--glass-border);
+    margin: 8px 10px;
+  }
+
+  /* ===== Project view (dynamic, replaces static np-header) ===== */
+  .project-header {
+    position: absolute;
+    top: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    width: 719px;
+    max-width: calc(100% - 80px);
+    text-align: center;
+  }
+  .project-title-input {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 26px;
+    font-weight: 600;
+    font-family: inherit;
+    text-align: center;
+    padding: 6px 14px;
+    outline: none;
+    width: 100%;
+    letter-spacing: -0.3px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .project-title-input::placeholder { color: var(--text-mute); }
+  .project-title-input:hover { background: var(--glass); }
+  .project-title-input:focus {
+    background: var(--glass);
+    border-color: var(--green-soft);
+  }
+  .project-subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 6px;
+  }
+
+  .project-history {
+    position: absolute;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 719px;
+    max-width: calc(100% - 80px);
+    max-height: calc(100vh - 260px);
+    overflow-y: auto;
+    z-index: 2;
+    padding: 4px 0;
+  }
+  .project-history::-webkit-scrollbar { width: 4px; }
+  .project-history::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 2px; }
+  .project-history-empty {
+    text-align: center;
+    color: var(--text-mute);
+    font-size: 13px;
+    padding: 60px 0;
+  }
+  /* Чат-пузыри: команда (user) справа, ответ терминала (assistant) слева */
+  .ph-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+    font-size: 13px;
+    max-width: 75%;
+  }
+
+  /* Команда пользователя — справа */
+  .ph-item.role-user {
+    margin-left: auto;
+    background: rgba(0, 122, 204, 0.1);
+    border-color: rgba(0, 122, 204, 0.3);
+    border-right: 3px solid var(--accent);
+    border-top-right-radius: 2px;
+    border-bottom-right-radius: 2px;
+  }
+  /* Ответ терминала — слева */
+  .ph-item.role-assistant {
+    margin-right: auto;
+    background: rgba(1, 154, 90, 0.08);
+    border-color: rgba(1, 154, 90, 0.3);
+    border-left: 3px solid var(--green);
+    border-top-left-radius: 2px;
+    border-bottom-left-radius: 2px;
+  }
+
+  /* Шапка пузыря: role + time + pill */
+  .ph-item .ph-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+  }
+  .ph-item .ph-role {
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 600;
+  }
+  .ph-item.role-user .ph-role { color: var(--accent); }
+  .ph-item.role-assistant .ph-role { color: var(--green); }
+  .ph-item .ph-time {
+    color: var(--text-mute);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .ph-item .ph-pill {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--success);
+    color: #fff;
+    font-weight: 500;
+  }
+  .ph-item .ph-pill.err { background: var(--error); }
+
+  /* Тело пузыря — текст команды или вывод */
+  .ph-item .ph-body {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    word-break: break-all;
+    /* Сохраняем переносы строк — важно для вывода терминала */
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .ph-item .ph-error {
+    color: var(--error);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+
+  /* Кнопка копирования в шапке пузыря */
+  .ph-copy {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--text-mute);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    flex: 0 0 auto;
+  }
+  .ph-item:hover .ph-copy { opacity: 1; }
+  .ph-copy:hover { color: var(--text); background: var(--glass-strong); }
+  .ph-copy.copied { color: var(--success); opacity: 1; }
+
+  /* Empty state for project view (no project selected) */
+  .project-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    text-align: center;
+    padding: 40px;
+  }
+  .project-empty-state h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 16px 0 8px;
+  }
+  .project-empty-state p {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  .project-empty-state .btn { margin-top: 8px; }
+
+  /* ===== Pipeline (Цепочка) ===== */
+  .pipeline-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 60px;
+  }
+  .pipeline-empty, .pipeline-results-empty {
+    text-align: center;
+    color: var(--text-mute);
+    font-size: 13px;
+    padding: 20px;
+    font-style: italic;
+  }
+  .pipeline-node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s ease;
+  }
+  .pipeline-node:hover { border-color: var(--green-soft); }
+  .pipeline-node-num {
+    flex: 0 0 auto;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pipeline-node-icon { flex: 0 0 auto; font-size: 18px; }
+  .pipeline-node-info { flex: 1 1 auto; min-width: 0; }
+  .pipeline-node-name {
+    font-size: 13px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pipeline-node-url {
+    font-size: 10px; color: var(--text-mute);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .pipeline-node-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+  .pipeline-node-actions button {
+    width: 26px; height: 26px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    color: var(--text-dim);
+    border-radius: 4px; cursor: pointer;
+    font-size: 14px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.12s ease;
+  }
+  .pipeline-node-actions button:hover { background: var(--glass-strong); color: var(--text); }
+  .pipeline-node-actions button.danger:hover { background: rgba(244,67,54,0.2); color: var(--error); }
+  .pipeline-arrow {
+    text-align: center;
+    color: var(--text-mute);
+    font-size: 16px;
+    margin: -4px 0;
+  }
+
+  /* Pipeline results — те же чат-пузыри, но с именем узла */
+  .pipeline-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 80px;
+  }
+  .pl-step {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    max-width: 85%;
+    font-size: 13px;
+  }
+  .pl-step.role-user {
+    margin-left: auto;
+    background: rgba(0,122,204,0.1);
+    border: 1px solid rgba(0,122,204,0.3);
+    border-right: 3px solid var(--accent);
+  }
+  .pl-step.role-ai {
+    margin-right: auto;
+    background: rgba(138,43,226,0.08);
+    border: 1px solid rgba(138,43,226,0.3);
+    border-left: 3px solid #8a2be2;
+  }
+  .pl-step.role-assistant {
+    margin-right: auto;
+    background: rgba(1,154,90,0.08);
+    border: 1px solid rgba(1,154,90,0.3);
+    border-left: 3px solid var(--green);
+  }
+  .pl-step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+  }
+  .pl-step-role {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .pl-step.role-user .pl-step-role { color: var(--accent); }
+  .pl-step.role-ai .pl-step-role { color: #c084fc; }
+  .pl-step.role-assistant .pl-step-role { color: var(--green); }
+  .pl-step-time { color: var(--text-mute); font-family: monospace; }
+  .pl-step-pill {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--success);
+    color: #fff;
+    font-weight: 500;
+  }
+  .pl-step-pill.err { background: var(--error); }
+  .pl-step-body {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+ <div class="sidebar-inner">
+  <div class="brand">
+    <div class="logo">
+      <!-- Иконка пользователя -->
+      <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g clip-path="url(#clip_dash)">
+          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -11 14)" fill="white"/>
+          <rect width="149.185" height="115.001" rx="14" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 26 263)" fill="white"/>
+          <rect width="42.7772" height="43.0002" rx="7" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 42 85)" fill="white"/>
+          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -103 181)" fill="white"/>
+          <rect width="149.185" height="115.001" rx="11" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 117 100)" fill="white"/>
+        </g>
+        <defs>
+          <clipPath id="clip_dash">
+            <rect width="128" height="128" fill="white" transform="translate(5.72205e-06 128) rotate(-90)"/>
+          </clipPath>
+        </defs>
+      </svg>
+    </div>
+    <div class="titles">
+      <div class="title">Firebase Bridge</div>
+      <div class="subtitle">→ VSCode Terminal</div>
+    </div>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Свернуть панель" aria-label="Свернуть панель">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M15 6 L9 12 L15 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+    </button>
+  </div>
+
+  <nav class="nav">
+    <button class="nav-item" data-view="workspace">
+      <span class="ico">💼</span>
+      <span class="label">Workspace</span>
+    </button>
+    <button class="nav-item" data-view="settings">
+      <span class="ico">⚙</span>
+      <span class="label">Настройки</span>
+    </button>
+
+    <div class="nav-divider"></div>
+
+    <button class="nav-item" id="new-project-btn">
+      <span class="ico">✦</span>
+      <span class="label">Новый проект</span>
+    </button>
+
+    <div class="projects-section">
+      <div class="projects-header">Проекты</div>
+      <ul class="projects-list" id="projects-list">
+        <li class="projects-empty">Нет проектов</li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="conn-label">Соединение:</div>
+    <div class="conn-value err" id="conn-status">не подключён</div>
+  </div>
+ </div>
+</aside>
+
+<main class="content">
+
+ <!-- Плавающая кнопка разворота сайдбара (видна только когда свёрнут) -->
+ <button class="sidebar-expand-btn" id="sidebar-expand-btn" title="Показать панель" aria-label="Показать панель">
+   <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+     <path d="M9 6 L15 12 L9 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+   </svg>
+ </button>
+
+  <!-- ===== View: Проект (prompt-style, dynamic) ===== -->
+  <section id="view-new-project" class="view">
+    <!-- Иконка-водяной знак (повёрнута -90deg, opacity 0.08) -->
+    <div class="np-watermark" aria-hidden="true">
+      <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g clip-path="url(#clip_np)">
+          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -11 14)" fill="#FFFFFF"/>
+          <rect width="149.185" height="115.001" rx="14" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 26 263)" fill="#FFFFFF"/>
+          <rect width="42.7772" height="43.0002" rx="7" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 42 85)" fill="#FFFFFF"/>
+          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -103 181)" fill="#FFFFFF"/>
+          <rect width="149.185" height="115.001" rx="11" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 117 100)" fill="#FFFFFF"/>
+        </g>
+        <defs>
+          <clipPath id="clip_np">
+            <rect width="128" height="128" fill="white" transform="translate(5.72205e-06 128) rotate(-90)"/>
+          </clipPath>
+        </defs>
+      </svg>
+    </div>
+
+    <!-- Empty state: показывается когда нет активного проекта -->
+    <div class="project-empty-state" id="project-empty-state">
+      <div style="font-size:48px;opacity:0.3;">✦</div>
+      <h2>Нет активного проекта</h2>
+      <p>Нажмите «Новый проект» в боковой панели, чтобы создать первый.</p>
+      <button type="button" class="btn btn-primary" id="empty-state-create-btn">Создать проект</button>
+    </div>
+
+    <!-- Активный проект: заголовок + история (скрыты пока нет проекта) -->
+    <div class="project-header" id="project-header" style="display:none;">
+      <input type="text" class="project-title-input" id="project-title-input" value="Новый проект" placeholder="Название проекта" spellcheck="false" />
+      <div class="project-subtitle">Опишите команду — она уйдёт в Firebase и выполнится в терминале VSCode</div>
+    </div>
+
+    <div class="project-history" id="project-history" style="display:none;">
+      <div class="project-history-empty">Команды появятся здесь после отправки</div>
+    </div>
+
+    <div class="np-prompt-wrap">
+      <!-- AI-режим: переключатель + статус вкладки DeepSeek -->
+      <div class="np-ai-bar">
+        <button type="button" class="ai-toggle" id="ai-toggle">AI режим: ВЫКЛ</button>
+        <span class="ai-status" id="ai-status">✗ не проверено</span>
+        <button type="button" class="pipeline-toggle" id="pipeline-toggle" title="Показать конструктор цепочки">🔗 Цепочка</button>
+        <button type="button" class="blockly-toggle" id="blockly-toggle" title="Показать блоки">🧩 Блоки</button>
+      </div>
+      <div class="np-prompt-bar">
+        <input type="text" id="np-prompt" placeholder="Например: echo Привет из браузера" autocomplete="off" spellcheck="false" />
+        <button type="button" class="np-send-btn" id="np-send-btn" title="Отправить (Enter)">
+          <!-- Иконка отправки: стрелка вверх -->
+          <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M10 16 V4 M4 10 L10 4 L16 10" stroke="#E5E5E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="np-divider"></div>
+    <div class="np-status" id="np-status"></div>
+
+    <!-- Правая панель: конструктор цепочки -->
+    <div class="pipeline-panel" id="pipeline-panel" style="display:none;">
+      <div class="pipeline-panel-header">
+        <span class="pipeline-panel-title">🔗 Цепочка</span>
+        <button type="button" class="pipeline-panel-close" id="pipeline-panel-close">×</button>
+      </div>
+      <div class="pipeline-panel-body">
+        <div id="pipeline-nodes" class="pipeline-nodes">
+          <div class="pipeline-empty">Нет узлов.</div>
+        </div>
+        <div class="pipeline-add-row">
+          <button type="button" class="btn btn-ghost pipeline-add-btn" id="pipeline-add-ai">+ AI</button>
+          <button type="button" class="btn btn-ghost pipeline-add-btn" id="pipeline-add-vscode">+ VSCode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blockly панель (правая сторона) -->
+    <div class="blockly-panel" id="blockly-panel" style="display:none;">
+      <div class="blockly-panel-header">
+        <span class="blockly-panel-title">🧩 Блоки</span>
+        <button type="button" class="blockly-panel-run" id="blockly-run-btn">▶ Выполнить</button>
+        <button type="button" class="blockly-panel-close" id="blockly-panel-close">×</button>
+      </div>
+      <div id="blockly-container" class="blockly-container">
+        <div id="blockly-workspace" style="width:100%;height:100%;"></div>
+      </div>
+      <xml id="blockly-toolbox" style="display:none;">
+        <category name="Промпт" colour="#7034e8">
+          <block type="nezar_send_prompt"></block>
+          <block type="nezar_prompt_text"></block>
+        </category>
+        <category name="Текст" colour="#5b80a5">
+          <block type="text"></block>
+          <block type="text_join"></block>
+          <block type="text_length"></block>
+          <block type="text_print"></block>
+        </category>
+        <category name="Логика" colour="#5b80a5">
+          <block type="controls_if"></block>
+          <block type="logic_compare"></block>
+          <block type="logic_operation"></block>
+          <block type="logic_negate"></block>
+          <block type="logic_boolean"></block>
+        </category>
+        <category name="Математика" colour="#5b67a5">
+          <block type="math_number"></block>
+          <block type="math_arithmetic"></block>
+          <block type="math_random_int"></block>
+        </category>
+        <category name="Циклы" colour="#5ba55b">
+          <block type="controls_repeat_ext"></block>
+          <block type="controls_whileUntil"></block>
+        </category>
+        <category name="Переменные" custom="VARIABLE" colour="#a55b80"></category>
+      </xml>
+    </div>
+  </section>
+
+  <!-- ===== View: Workspace ===== -->
+  <section id="view-workspace" class="view">
+    <div class="padded-view">
+      <h1>Workspace</h1>
+      <p class="lead">Введите команду и отправьте — она попадёт в Firebase Realtime DB, а VSCode выполнит её в терминале «Firebase Bridge».</p>
+
+      <div class="glass-card">
+        <textarea class="workspace-textarea" id="cmd" placeholder="например: echo Привет из браузера" spellcheck="false"></textarea>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="send-btn">Отправить</button>
+          <button type="button" class="btn btn-ghost" id="clear-btn">Очистить</button>
+        </div>
+        <div class="kbd-hint">
+          <span class="kbd">Enter</span> отправить · <span class="kbd">Shift+Enter</span> перенос · <span class="kbd">Ctrl/Cmd+Enter</span> тоже отправить
+        </div>
+        <div class="status-line" id="send-status"></div>
+      </div>
+
+      <h2>История команд</h2>
+      <ul class="history" id="history">
+        <li class="history-empty">Пока ничего не отправлено.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===== View: Настройки ===== -->
+  <section id="view-settings" class="view">
+    <div class="padded-view">
+      <h1>Настройки Firebase</h1>
+      <p class="lead">Введите данные подключения к Realtime Database и нажмите «Подключить». Соединение будет проверено реальным запросом.</p>
+
+      <div class="glass-card">
+        <form id="settings-form" autocomplete="off">
+          <div class="field">
+            <label for="db-url">Database URL</label>
+            <input type="text" id="db-url" placeholder="https://YOUR-PROJECT-default-rtdb.firebaseio.com" spellcheck="false" />
+            <div class="hint">Firebase Console → Build → Realtime Database → Data, URL сверху.</div>
+          </div>
+
+          <div class="field">
+            <label for="api-key">API Key (необязательно)</label>
+            <input type="password" id="api-key" placeholder="AIza..." spellcheck="false" />
+            <div class="hint">Нужен только если включите аутентификацию. Для тестового режима не требуется.</div>
+          </div>
+
+          <div class="field">
+            <label for="db-path">Путь в базе</label>
+            <input type="text" id="db-path" value="commands/queue" spellcheck="false" />
+            <div class="hint">Должен совпадать с настройкой <code>firebaseTerminal.databasePath</code> в VSCode-расширении.</div>
+          </div>
+
+          <div class="field">
+            <label for="source-name">Имя источника</label>
+            <input type="text" id="source-name" value="browser-extension" spellcheck="false" />
+            <div class="hint">Метка в заголовке команды в терминале VSCode.</div>
+          </div>
+
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary" id="connect-btn">Подключить</button>
+            <button type="button" class="btn btn-ghost" id="reset-btn">Сбросить</button>
+          </div>
+
+          <div class="status-line" id="settings-status"></div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="blockly.min.js"></script>
+<script src="blocks_compressed.js"></script>
+<script src="javascript_compressed.js"></script>
+<script src="blockly_msg_ru.js"></script>
+<script src="blockly.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>
