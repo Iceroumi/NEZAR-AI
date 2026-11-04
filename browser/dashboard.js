@@ -10,10 +10,9 @@
  *   4. Workspace: textarea → POST в Realtime DB → лог в историю.
  * ============================================================ */
 
-// Дефолтные значения (используются, если в chrome.storage ничего нет).
-// databaseURL предзаполнен вашим проектом — при первом открытии достаточно нажать «Подключить».
+// Дефолтные значения — пустые, пользователь вводит через «Настройки».
 const FIREBASE_DEFAULTS = {
-  databaseURL: "https://nezar-acc32-default-rtdb.europe-west1.firebasedatabase.app",
+  databaseURL: "",
   apiKey: "",
   databasePath: "commands/queue",
   source: "browser-extension",
@@ -521,6 +520,14 @@ async function selectProject(id) {
 
   switchView("new-project");
   npPromptInput.focus();
+
+  // Сохраняем блоки предыдущего проекта, загружаем блоки нового
+  if (typeof saveBlocklyState === 'function') {
+    saveBlocklyState();
+  }
+  if (typeof loadBlocklyStateForProject === 'function') {
+    loadBlocklyStateForProject(activeProject);
+  }
 }
 
 // Переименование активного проекта (по вводу в project-title-input).

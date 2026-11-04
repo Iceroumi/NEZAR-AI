@@ -469,8 +469,23 @@
     overflow: hidden;
     min-width: 0;
   }
+  /* Ресайзер между чатом и блоками */
+  .np-resizer {
+    flex: 0 0 6px;
+    cursor: ew-resize;
+    background: var(--border);
+    height: 100vh;
+    z-index: 50;
+    transition: background 0.15s ease;
+  }
+  .np-resizer:hover {
+    background: var(--accent);
+  }
+  .np-resizer.active {
+    background: var(--accent);
+  }
   .np-blockly-side {
-    flex: 0 0 480px;
+    flex: 0 0 var(--blockly-width, 480px);
     position: relative;
     height: 100vh;
     overflow: hidden;
@@ -770,12 +785,30 @@
     stroke: #333 !important;
   }
   .blocklyToolboxDiv {
-    background: var(--grad-to) !important;
+    background: #121212 !important;
     border-top: 1px solid var(--border);
   }
+  .blocklyToolboxCategory {
+    color: var(--text-dim) !important;
+  }
+  .blocklyToolboxCategory:hover {
+    background: rgba(128, 110, 255, 0.15) !important;
+    color: var(--text) !important;
+  }
+  .blocklyToolboxCategorySelected {
+    background: rgba(128, 110, 255, 0.2) !important;
+    color: var(--text) !important;
+  }
+  .blocklyToolboxCategoryLabel {
+    color: var(--text-dim) !important;
+    font-weight: 500;
+  }
+  .blocklyToolboxCategorySelected .blocklyToolboxCategoryLabel {
+    color: var(--text) !important;
+  }
   .blocklyFlyoutBackground {
-    fill: var(--grad-to) !important;
-    fill-opacity: 0.95 !important;
+    fill: #1a1a1a !important;
+    fill-opacity: 0.98 !important;
   }
   .blockly-panel-header {
     display: flex;
@@ -1437,10 +1470,15 @@
 
     </div><!-- /np-chat-side -->
 
+    <!-- Ресайзер: тянуть за край чтобы изменить размер -->
+    <div class="np-resizer" id="np-resizer"></div>
+
     <!-- ПРАВАЯ СТОРОНА: BLOCKLY -->
     <div class="np-blockly-side" id="blockly-panel" style="display:none;">
       <div class="blockly-panel-header">
         <span class="blockly-panel-title">🧩 Блоки</span>
+        <button type="button" class="btn btn-ghost blockly-copy-btn" id="blockly-copy-btn" title="Копировать все блоки">⧉</button>
+        <button type="button" class="btn btn-ghost blockly-paste-btn" id="blockly-paste-btn" title="Вставить блоки">📋</button>
         <button type="button" class="blockly-panel-close" id="blockly-panel-close">×</button>
       </div>
       <div id="blockly-container" class="blockly-container">
@@ -1450,40 +1488,34 @@
         <category name="Промпт" colour="#63A9AC">
           <block type="nezar_prompt"></block>
           <block type="nezar_text"></block>
-          <block type="nezar_join">
-            <value name="A"><shadow type="nezar_text"></shadow></value>
-            <value name="B"><shadow type="nezar_text"></shadow></value>
-          </block>
+          <block type="nezar_join"></block>
         </category>
         <category name="Действия" colour="#5757FF">
-          <block type="nezar_send_deepseek">
-            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
-            <value name="URL"><shadow type="nezar_text"><field name="TEXT">https://chat.deepseek.com</field></shadow></value>
-            <value name="VAR"><shadow type="nezar_text"><field name="TEXT">ai_result</field></shadow></value>
-          </block>
-          <block type="nezar_send_vscode">
-            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
-          </block>
-          <block type="nezar_print">
-            <value name="TEXT"><shadow type="nezar_text"></shadow></value>
-          </block>
+          <block type="nezar_send_deepseek"></block>
+          <block type="nezar_send_vscode"></block>
+          <block type="nezar_print"></block>
         </category>
         <category name="Навыки" colour="#9B59B6">
-          <block type="nezar_skill">
-            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">мой_навык</field></shadow></value>
-          </block>
-          <block type="nezar_call_skill">
-            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">мой_навык</field></shadow></value>
-          </block>
+          <block type="nezar_skill"></block>
+          <block type="nezar_call_skill"></block>
         </category>
-        <category name="Переменные" colour="#a55b80">
-          <block type="nezar_set_var">
-            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">result</field></shadow></value>
-            <value name="VALUE"><shadow type="nezar_text"></shadow></value>
+        <category name="Переменные" custom="VARIABLE" colour="#a55b80"></category>
+        <category name="Логика" colour="#5b80a5">
+          <block type="controls_if"></block>
+          <block type="logic_compare"></block>
+          <block type="logic_operation"></block>
+          <block type="logic_negate"></block>
+          <block type="logic_boolean"></block>
+        </category>
+        <category name="Циклы" colour="#5ba55b">
+          <block type="controls_repeat_ext">
+            <value name="TIMES">
+              <shadow type="math_number">
+                <field name="NUM">3</field>
+              </shadow>
+            </value>
           </block>
-          <block type="nezar_get_var">
-            <value name="NAME"><shadow type="nezar_text"><field name="TEXT">result</field></shadow></value>
-          </block>
+          <block type="controls_whileUntil"></block>
         </category>
       </xml>
     </div><!-- /np-blockly-side -->
@@ -1561,8 +1593,6 @@
 </main>
 
 <script src="blockly.min.js"></script>
-<script src="blocks_compressed.js"></script>
-<script src="javascript_compressed.js"></script>
 <script src="blockly_msg_ru.js"></script>
 <script src="blockly.js"></script>
 <script src="dashboard.js"></script>
