@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebase → VSCode</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --panel: #252526;
+    --panel-2: #2d2d2d;
+    --text: #e6e6e6;
+    --text-dim: #a6a6a6;
+    --accent: #007acc;
+    --accent-hover: #1f8ad2;
+    --success: #4caf50;
+    --error: #f44336;
+    --border: #3c3c3c;
+    --radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    width: 360px;
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .logo {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    /* Тёмная подложка под белые фигуры из иконки пользователя */
+    background: var(--accent);
+    border-radius: 4px;
+    padding: 2px;
+  }
+  .header h1 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .icon-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    flex: 0 0 auto;
+  }
+  .icon-btn:hover {
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .view { padding: 12px; }
+  .view.hidden { display: none; }
+  .label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin: 0 0 4px;
+  }
+  .subheader {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    margin: 0 0 10px;
+  }
+  .hint code {
+    background: var(--panel-2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .textarea, .input {
+    width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: "SF Mono", Menlo, Consolas, "Cascadia Code", monospace;
+    outline: none;
+  }
+  .textarea {
+    min-height: 90px;
+    resize: vertical;
+    margin-bottom: 10px;
+  }
+  .input { margin-bottom: 10px; }
+  .textarea:focus, .input:focus { border-color: var(--accent); }
+  .row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .btn {
+    flex: 1;
+    border: none;
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .btn-ghost:hover { background: var(--panel-2); color: var(--text); }
+  .status {
+    font-size: 11px;
+    min-height: 16px;
+    margin: 6px 0 0;
+    color: var(--text-dim);
+    word-break: break-word;
+  }
+  .status.ok { color: var(--success); }
+  .status.err { color: var(--error); }
+  .footer {
+    padding: 8px 12px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  #footer-status.ok { color: var(--success); }
+  #footer-status.err { color: var(--error); }
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="brand">
+    <!-- Иконка пользователя, встроенная инлайном (SVG из /upload/icon.svg) -->
+    <svg class="logo" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g clip-path="url(#clip0_16_2)">
+        <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -11 14)" fill="white"/>
+        <rect width="149.185" height="115.001" rx="14" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 26 263)" fill="white"/>
+        <rect width="42.7772" height="43.0002" rx="7" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 42 85)" fill="white"/>
+        <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -103 181)" fill="white"/>
+        <rect width="149.185" height="115.001" rx="11" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 117 100)" fill="white"/>
+      </g>
+      <defs>
+        <clipPath id="clip0_16_2">
+          <rect width="128" height="128" fill="white" transform="translate(5.72205e-06 128) rotate(-90)"/>
+        </clipPath>
+      </defs>
+    </svg>
+    <h1>Команда в VSCode</h1>
+  </div>
+  <button id="settings-btn" class="icon-btn" title="Настройки Firebase" aria-label="Настройки">⚙</button>
+</header>
+
+<main id="main-view" class="view">
+  <label for="cmd" class="label">Команда или текст</label>
+  <textarea id="cmd" class="textarea" placeholder="например: echo Привет из браузера" autofocus spellcheck="false"></textarea>
+  <div class="row">
+    <button id="send-btn" class="btn btn-primary" type="button">Отправить</button>
+    <button id="clear-btn" class="btn btn-ghost" type="button">Очистить</button>
+  </div>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+</main>
+
+<section id="settings-view" class="view hidden">
+  <h2 class="subheader">Настройки Firebase</h2>
+  <p class="hint">
+    Заполните <code>databaseURL</code> (Firebase Console → Realtime Database → Data, URL вида <code>https://&lt;project&gt;-default-rtdb.firebaseio.com</code>).
+  </p>
+  <label for="db-url" class="label">Database URL</label>
+  <input id="db-url" class="input" type="text" placeholder="https://YOUR-PROJECT-default-rtdb.firebaseio.com" spellcheck="false" autocomplete="off" />
+  <label for="db-path" class="label">Путь в базе</label>
+  <input id="db-path" class="input" type="text" placeholder="commands/queue" spellcheck="false" autocomplete="off" />
+  <label for="source-name" class="label">Имя источника (необязательно)</label>
+  <input id="source-name" class="input" type="text" placeholder="browser-extension" spellcheck="false" autocomplete="off" />
+  <div class="row">
+    <button id="save-settings-btn" class="btn btn-primary" type="button">Сохранить</button>
+    <button id="back-btn" class="btn btn-ghost" type="button">Назад</button>
+  </div>
+  <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+</section>
+
+<footer class="footer">
+  <span id="footer-status">Firebase: не настроен</span>
+</footer>
+
+<script src="popup.js"></script>
+</body>
+</html>

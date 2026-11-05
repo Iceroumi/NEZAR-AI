@@ -30,7 +30,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "nativeMessaging"],
   "host_permissions": [
     "https://*.firebaseio.com/*",
     "https://*.firebasedatabase.app/*",

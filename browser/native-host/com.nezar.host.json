@@ -1,0 +1,9 @@
+{
+  "name": "com.nezar.host",
+  "description": "NEZAR Native Messaging Host — bridge between browser extension and OS terminal",
+  "path": "/usr/local/bin/nezar-host.sh",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://PLACEHOLDER_EXTENSION_ID/"
+  ]
+}

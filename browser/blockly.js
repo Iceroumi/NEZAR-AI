@@ -92,6 +92,19 @@ Blockly.defineBlocksWithJsonArray([
     "tooltip": "Выполнить команду. Вывод записывается в переменную."
   },
   {
+    "type": "nezar_send_native",
+    "message0": "терминал native %1 папка %2 вывод в %3",
+    "args0": [
+      { "type": "input_value", "name": "TEXT", "check": "String" },
+      { "type": "input_value", "name": "CWD", "check": "String" },
+      { "type": "input_value", "name": "VAR", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#1ABC9C",
+    "tooltip": "Выполнить команду в ОС-терминале через Native Messaging (без VSCode). Вывод в переменную."
+  },
+  {
     "type": "nezar_skill",
     "message0": "навык %1 %2",
     "args0": [
@@ -186,6 +199,78 @@ async function nezarSendToVSCode(text, varName) {
     blocklyVscodeOutput = '(таймаут)';
     if (varName) blocklyVariables[varName] = '(таймаут)';
     await addHistoryEntry({ role: 'assistant', text: '(таймаут)', timestamp: Date.now(), status: 'err', requestId });
+  }
+}
+
+// ============================================================
+// Native Messaging: выполнить команду в ОС-терминале
+// ============================================================
+
+async function nezarSendToNative(text, cwd, varName) {
+  console.log('[nezar-blockly] Native terminal:', text.slice(0, 60), 'cwd:', cwd, '→ var:', varName);
+
+  // Шлём команду в background → native host
+  let resp;
+  try {
+    resp = await chrome.runtime.sendMessage({
+      action: 'native_run',
+      command: text,
+      cwd: cwd || null,
+      timeout: 60000,
+    });
+  } catch (e) {
+    console.error('[nezar-blockly] native_run sendMessage failed:', e.message);
+    if (varName) blocklyVariables[varName] = '(ошибка: ' + e.message + ')';
+    if (activeProject) {
+      await addHistoryEntry({
+        role: 'assistant',
+        text: '(native ошибка: ' + e.message + ')',
+        timestamp: Date.now(),
+        status: 'err',
+        nodeName: 'blockly',
+      });
+    }
+    return;
+  }
+
+  if (!resp || !resp.ok) {
+    const errMsg = (resp && resp.error) || 'неизвестная ошибка';
+    console.error('[nezar-blockly] native_run error:', errMsg);
+    if (varName) blocklyVariables[varName] = '(ошибка: ' + errMsg + ')';
+    if (activeProject) {
+      await addHistoryEntry({
+        role: 'assistant',
+        text: '(native ошибка: ' + errMsg + ')',
+        timestamp: Date.now(),
+        status: 'err',
+        nodeName: 'blockly',
+      });
+    }
+    return;
+  }
+
+  // Успешно — собираем вывод (stdout + stderr если есть)
+  const stdout = resp.stdout || '';
+  const stderr = resp.stderr || '';
+  const exitCode = resp.exitCode;
+  const output = (stderr ? stdout + '\n[stderr]\n' + stderr : stdout) || '(нет вывода)';
+
+  if (varName) {
+    blocklyVariables[varName] = output;
+    console.log('[nezar-blockly] Native output → "' + varName + '" (exit=' + exitCode + ', len=' + output.length + ')');
+  }
+
+  // В чат тоже пишем — для визуализации
+  if (activeProject) {
+    const hasError = typeof exitCode === 'number' && exitCode !== 0;
+    await addHistoryEntry({
+      role: 'assistant',
+      text: output,
+      timestamp: Date.now(),
+      status: hasError ? 'err' : 'ok',
+      exitCode,
+      nodeName: 'blockly',
+    });
   }
 }
 
@@ -351,6 +436,21 @@ async function execBlock(block) {
     }
     console.log('[nezar-blockly] → VSCode text=' + text.slice(0,60) + ' varName="' + varName + '"');
     await nezarSendToVSCode(text, varName);
+  } else if (t === 'nezar_send_native') {
+    const text = readStr('TEXT');
+    const cwd = readStr('CWD') || null;
+    let varName = '';
+    const varBlock = block.getInputTargetBlock('VAR');
+    if (varBlock) {
+      if (varBlock.type === 'variables_get') {
+        const vf = varBlock.getField('VAR');
+        varName = vf && vf.getText ? vf.getText() : '';
+      } else {
+        varName = String(evalBlock(varBlock));
+      }
+    }
+    console.log('[nezar-blockly] → Native text=' + text.slice(0,60) + ' cwd=' + cwd + ' varName="' + varName + '"');
+    await nezarSendToNative(text, cwd, varName);
   } else if (t === 'nezar_print') {
     const text = readStr('TEXT');
     if (activeProject) {

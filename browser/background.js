@@ -6,9 +6,155 @@
  *   2. Найти открытую вкладку AI-чата (DeepSeek/Qwen/GLM) для AI-режима.
  *   3. Пересылать промпты из dashboard → content script на AI-вкладке.
  *   4. Пересылать стрим ответов от content script → dashboard.
+ *   5. Native Messaging: связь с ОС-терминалом через com.nezar.host.
  */
 
 const AI_HOSTS = ['chat.deepseek.com', 'chat.qwen.ai', 'chat.z.ai'];
+const NATIVE_HOST_NAME = 'com.nezar.host';
+
+// ============================================================
+// Native Messaging: связь с ОС-терминалом
+// ============================================================
+
+// Активные подключения к native host (по reqId).
+// Каждое обращение = отдельный порт, чтобы проще было закрывать.
+const nativePorts = new Map(); // reqId → chrome.runtime.Port
+const nativeResponses = new Map(); // reqId → { stdout, stderr, exitCode, done, error }
+
+// Проверка связи с native host.
+async function pingNativeHost() {
+  return new Promise((resolve) => {
+    let port;
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    } catch (e) {
+      resolve({ ok: false, error: 'connectNative failed: ' + e.message });
+      return;
+    }
+    const reqId = 'ping_' + Date.now();
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try { port.disconnect(); } catch (e) {}
+        resolve({ ok: false, error: 'ping timeout (host не отвечает за 3 сек). Native host установлен?' });
+      }
+    }, 3000);
+
+    port.onMessage.addListener((msg) => {
+      if (msg && msg.type === 'pong' && !settled) {
+        settled = true;
+        clearTimeout(timer);
+        try { port.disconnect(); } catch (e) {}
+        resolve({ ok: true, info: msg });
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        const lastErr = chrome.runtime.lastError;
+        resolve({
+          ok: false,
+          error: 'Native host disconnected. ' + (lastErr ? lastErr.message : 'Возможно не установлен. Запустите install-*.js'),
+        });
+      }
+    });
+    try {
+      port.postMessage({ id: reqId, type: 'ping' });
+    } catch (e) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        try { port.disconnect(); } catch (err) {}
+        resolve({ ok: false, error: 'postMessage failed: ' + e.message });
+      }
+    }
+  });
+}
+
+// Запуск команды через native host. Возвращает полный вывод и exit code.
+async function runNativeCommand(command, cwd, timeout) {
+  return new Promise((resolve) => {
+    const reqId = 'cmd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    let port;
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    } catch (e) {
+      resolve({ ok: false, error: 'connectNative failed: ' + e.message });
+      return;
+    }
+
+    const state = { stdout: '', stderr: '', exitCode: null, done: false, error: null };
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { port.disconnect(); } catch (e) {}
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      finish({
+        ok: false,
+        error: 'Таймаут выполнения (' + (timeout || 60000) + 'ms)',
+        stdout: state.stdout,
+        stderr: state.stderr,
+      });
+    }, (timeout || 60000) + 5000); // +5 сек запас сверх таймаута host-а
+
+    port.onMessage.addListener((msg) => {
+      if (!msg || msg.id !== reqId) return;
+      if (msg.type === 'stdout') {
+        state.stdout += msg.text || '';
+      } else if (msg.type === 'stderr') {
+        state.stderr += msg.text || '';
+      } else if (msg.type === 'done') {
+        clearTimeout(timer);
+        finish({
+          ok: true,
+          stdout: msg.stdout || state.stdout,
+          stderr: msg.stderr || state.stderr,
+          exitCode: typeof msg.exitCode === 'number' ? msg.exitCode : 0,
+        });
+      } else if (msg.type === 'error') {
+        clearTimeout(timer);
+        finish({
+          ok: false,
+          error: msg.error || 'native host error',
+          stdout: msg.stdout || state.stdout,
+          stderr: msg.stderr || state.stderr,
+        });
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      const lastErr = chrome.runtime.lastError;
+      clearTimeout(timer);
+      if (!settled) {
+        finish({
+          ok: false,
+          error: 'Native host disconnected unexpectedly. ' + (lastErr ? lastErr.message : ''),
+          stdout: state.stdout,
+          stderr: state.stderr,
+        });
+      }
+    });
+
+    try {
+      port.postMessage({
+        id: reqId,
+        command: command,
+        cwd: cwd || null,
+        timeout: timeout || 60000,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      finish({ ok: false, error: 'postMessage failed: ' + e.message });
+    }
+  });
+}
 
 // ============================================================
 // Открыть dashboard
@@ -178,6 +324,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.error('[nezar-bg] send_to_specific_tab: FAILED:', e.message);
         sendResponse({ ok: false, error: 'Не удалось связаться с вкладкой. Перезагрузите F5. ' + e.message });
       });
+    return true;
+  }
+
+  // dashboard → background: проверить связь с native host
+  if (msg.action === 'native_ping') {
+    console.log('[nezar-bg] native_ping');
+    pingNativeHost()
+      .then(r => { console.log('[nezar-bg] native_ping response:', r); sendResponse(r); })
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  // dashboard → background → native host: выполнить команду
+  if (msg.action === 'native_run') {
+    console.log('[nezar-bg] native_run: cwd=' + msg.cwd + ' cmd=' + (msg.command || '').slice(0, 60));
+    runNativeCommand(msg.command, msg.cwd, msg.timeout)
+      .then(r => {
+        console.log('[nezar-bg] native_run done: ok=' + r.ok + ' exitCode=' + r.exitCode + ' stdoutLen=' + (r.stdout || '').length);
+        sendResponse(r);
+      })
+      .catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }
 
