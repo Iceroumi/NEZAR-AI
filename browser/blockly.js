@@ -67,6 +67,19 @@ Blockly.defineBlocksWithJsonArray([
     "tooltip": "Запрос в DeepSeek. Ответ в переменную."
   },
   {
+    "type": "nezar_send_qwen",
+    "message0": "запрос к qwen %1 вкладка %2 ответ в %3",
+    "args0": [
+      { "type": "input_value", "name": "TEXT", "check": "String" },
+      { "type": "input_value", "name": "URL", "check": "String" },
+      { "type": "input_value", "name": "VAR", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#7C3AED",
+    "tooltip": "Запрос в Qwen. Ответ в переменную."
+  },
+  {
     "type": "nezar_send_vscode",
     "message0": "выполнить vscode %1 вывод в %2",
     "args0": [
@@ -307,6 +320,22 @@ async function execBlock(block) {
     }
     if (!varName) varName = 'ai_result';
     console.log('[nezar-blockly] → DeepSeek text=' + text.slice(0,60) + ' url=' + url + ' varName="' + varName + '"');
+    await nezarSendToDeepSeek(text, url, varName);
+  } else if (t === 'nezar_send_qwen') {
+    const text = readStr('TEXT');
+    const url = readStr('URL') || 'https://chat.qwen.ai';
+    let varName = '';
+    const varBlock = block.getInputTargetBlock('VAR');
+    if (varBlock) {
+      if (varBlock.type === 'variables_get') {
+        const vf = varBlock.getField('VAR');
+        varName = vf && vf.getText ? vf.getText() : '';
+      } else {
+        varName = String(evalBlock(varBlock));
+      }
+    }
+    if (!varName) varName = 'ai_result';
+    console.log('[nezar-blockly] → Qwen text=' + text.slice(0,60) + ' url=' + url + ' varName="' + varName + '"');
     await nezarSendToDeepSeek(text, url, varName);
   } else if (t === 'nezar_send_vscode') {
     const text = readStr('TEXT');

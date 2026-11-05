@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Firebase → VSCode Terminal Bridge",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Dashboard: отправка команд в терминал VSCode через Firebase. Опционально — через AI (DeepSeek/Qwen/GLM).",
   "icons": {
     "16": "icons/icon16.png",
