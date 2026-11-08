@@ -1,66 +1,33 @@
 /* ============================================================
- * dashboard.js — логика полностраничного dashboard расширения.
+ * dashboard.js — NEZAR dashboard logic (NO Firebase).
  *
- * Структура:
- *   1. Состояние: cachedSettings (из chrome.storage.sync) +
- *                 history (из chrome.storage.local, последние 20).
- *   2. Навигация: клик по пункту бокового меню переключает вид.
- *   3. Settings: форма → при «Подключить» тестируется реальным
- *      POST+DELETE → при успехе сохраняется и активируется Workspace.
- *   4. Workspace: textarea → POST в Realtime DB → лог в историю.
+ * Архитектура:
+ *   - Проекты хранятся в IndexedDB (per-project isolation).
+ *   - Каждый проект = отдельный чат со своими Blockly-блоками.
+ *   - Терминал: через Native Messaging (chrome.runtime.sendMessage
+ *     action:'native_run'). Никакого облака.
+ *   - AI: web-чаты DeepSeek/Qwen/GLM через content scripts.
  * ============================================================ */
 
-// Дефолтные значения — пустые, пользователь вводит через «Настройки».
-const FIREBASE_DEFAULTS = {
-  databaseURL: "",
-  apiKey: "",
-  databasePath: "commands/queue",
-  source: "browser-extension",
-};
-
-// Состояние.
-let cachedSettings = Object.assign({}, FIREBASE_DEFAULTS);
-let history = [];          // массив записей {text, timestamp, status, error?}
-let isTesting = false;     // флаг идущего теста соединения
-const HISTORY_LIMIT = 20;
-
-// Состояние проектов.
+// ============================================================
+// Состояние проектов (per-project isolation)
+// ============================================================
 let projects = [];           // все проекты из IndexedDB (отсортированы по updatedAt)
 let activeProjectId = null;  // ID выбранного проекта
 let activeProject = null;    // полный объект выбранного проекта
 
-// AI-режим: промпт отправляется в DeepSeek/Qwen/GLM, ответ — в Firebase как команда.
+// AI-режим: промпт отправляется в DeepSeek/Qwen/GLM, ответ — в терминал.
 let aiMode = false;
 let aiTabStatus = { ok: false, site: '', error: 'не проверено' };
 
-// Pipeline (Цепочка): массив узлов {id, type, name, url}
-let pipelineNodes = [];
-let pipelineRunning = false;
+// Native host status
+let nativeHostStatus = { ok: false, error: 'не проверено', info: null };
 
 // DOM.
 const navItems = document.querySelectorAll(".nav-item");
 const views = {
   "new-project": document.getElementById("view-new-project"),
-  settings: document.getElementById("view-settings"),
-  workspace: document.getElementById("view-workspace"),
 };
-
-// Settings DOM.
-const settingsForm = document.getElementById("settings-form");
-const dbUrlInput = document.getElementById("db-url");
-const apiKeyInput = document.getElementById("api-key");
-const dbPathInput = document.getElementById("db-path");
-const sourceInput = document.getElementById("source-name");
-const connectBtn = document.getElementById("connect-btn");
-const resetBtn = document.getElementById("reset-btn");
-const settingsStatus = document.getElementById("settings-status");
-
-// Workspace DOM.
-const cmdTextarea = document.getElementById("cmd");
-const sendBtn = document.getElementById("send-btn");
-const clearBtn = document.getElementById("clear-btn");
-const sendStatus = document.getElementById("send-status");
-const historyList = document.getElementById("history");
 
 // New Project DOM.
 const npPromptInput = document.getElementById("np-prompt");
@@ -84,113 +51,28 @@ const emptyStateCreateBtn = document.getElementById("empty-state-create-btn");
 const aiToggleBtn = document.getElementById("ai-toggle");
 const aiStatusEl = document.getElementById("ai-status");
 
-// Pipeline DOM (правая панель внутри Новый проект).
-const pipelineToggleBtn = document.getElementById("pipeline-toggle");
-const pipelinePanel = document.getElementById("pipeline-panel");
-const pipelinePanelClose = document.getElementById("pipeline-panel-close");
-const pipelineNodesEl = document.getElementById("pipeline-nodes");
-const pipelineAddAIBtn = document.getElementById("pipeline-add-ai");
-const pipelineAddVSCodeBtn = document.getElementById("pipeline-add-vscode");
-
-// Sidebar footer.
+// Sidebar footer / native host status.
 const connStatusEl = document.getElementById("conn-status");
+const reconnectBtn = document.getElementById("reconnect-btn");
 
 // ============================================================
 // Глобальный debug-listener — логирует ВСЕ сообщения в dashboard.
-// Помогает найти обрыв в цепочке: content → background → dashboard.
 // ============================================================
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log('[nezar-dash] GLOBAL MSG:', msg.action,
     'phase=' + (msg.phase || ''),
     'textLen=' + (msg.text || '').length,
-    'bindingId=' + (msg.bindingId || ''),
     'fromTab=' + (sender.tab?.id || 'N/A'));
-  // Не перехватываем — другие listeners тоже получат сообщение.
   return false;
 });
 
 // ============================================================
-// Работа с chrome.storage
+// IndexedDB — хранилище проектов
 // ============================================================
-
-function loadSettings() {
-  return new Promise((resolve) => {
-    if (!chrome || !chrome.storage || !chrome.storage.sync) {
-      resolve(Object.assign({}, FIREBASE_DEFAULTS));
-      return;
-    }
-    chrome.storage.sync.get(
-      ["databaseURL", "apiKey", "databasePath", "source"],
-      (stored) => {
-        cachedSettings = {
-          databaseURL: stored.databaseURL || FIREBASE_DEFAULTS.databaseURL,
-          apiKey: stored.apiKey || FIREBASE_DEFAULTS.apiKey,
-          databasePath: stored.databasePath || FIREBASE_DEFAULTS.databasePath,
-          source: stored.source || FIREBASE_DEFAULTS.source,
-        };
-        resolve(cachedSettings);
-      },
-    );
-  });
-}
-
-function saveSettings(values) {
-  return new Promise((resolve, reject) => {
-    if (!chrome || !chrome.storage || !chrome.storage.sync) {
-      cachedSettings = Object.assign({}, values);
-      resolve();
-      return;
-    }
-    chrome.storage.sync.set(values, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      cachedSettings = Object.assign({}, values);
-      resolve();
-    });
-  });
-}
-
-function loadHistory() {
-  return new Promise((resolve) => {
-    if (!chrome || !chrome.storage || !chrome.storage.local) {
-      resolve([]);
-      return;
-    }
-    chrome.storage.local.get(["history"], (stored) => {
-      history = Array.isArray(stored.history) ? stored.history : [];
-      resolve(history);
-    });
-  });
-}
-
-function saveHistory(items) {
-  return new Promise((resolve, reject) => {
-    history = items;
-    if (!chrome || !chrome.storage || !chrome.storage.local) {
-      resolve();
-      return;
-    }
-    chrome.storage.local.set({ history: items }, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-// ============================================================
-// IndexedDB — хранилище проектов (как ChatGPT conversations)
-// ============================================================
-
-const DB_NAME = "firebase-bridge-db";
-const DB_VERSION = 1;
+const DB_NAME = "nezar-db";
+const DB_VERSION = 2;  // bumped: мигрируем со старой firebase-bridge-db
 const STORE_PROJECTS = "projects";
 
-// Открывает (и при необходимости создаёт/мигрирует) БД.
 function openDB() {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
@@ -219,6 +101,11 @@ async function dbCreateProject(name) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     history: [],
+    blocklyWorkspace: '',     // сериализованные блоки (JSON)
+    blocklyVariables: {},     // runtime значения переменных
+    blocklySkills: {},        // определённые навыки
+    blocklyPromptText: '',
+    editorStateSnapshot: '',
   };
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_PROJECTS, "readwrite");
@@ -253,7 +140,7 @@ async function dbGetProject(id) {
   });
 }
 
-// Обновляет проект (name или history). Ставит новый updatedAt.
+// Обновляет проект. Ставит новый updatedAt.
 async function dbUpdateProject(project) {
   const db = await openDB();
   project.updatedAt = Date.now();
@@ -276,115 +163,29 @@ async function dbDeleteProject(id) {
 }
 
 // ============================================================
-// Firebase REST API
-// ============================================================
-
-function buildUrl(dbUrl, dbPath) {
-  const base = (dbUrl || "").replace(/\/+$/, "");
-  const path = (dbPath || "commands/queue")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-  return base + "/" + path + ".json";
-}
-
-function isConfigured() {
-  const url = cachedSettings.databaseURL || "";
-  return url.indexOf("https://") === 0 && url.indexOf("YOUR-PROJECT") === -1;
-}
-
-// POST записи в Realtime DB. Возвращает ключ новой записи (name).
-async function postRecord(payload) {
-  if (!isConfigured()) {
-    throw new Error("Firebase не настроен. Откройте «Настройки» и нажмите «Подключить».");
-  }
-  const url = buildUrl(cachedSettings.databaseURL, cachedSettings.databasePath);
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!resp.ok) {
-    let detail = "";
-    try {
-      const errBody = await resp.json();
-      detail = (errBody && errBody.error) || JSON.stringify(errBody);
-    } catch (e) {
-      detail = await resp.text().catch(() => "");
-    }
-    throw new Error("HTTP " + resp.status + ": " + detail);
-  }
-  const result = await resp.json();
-  return (result && result.name) || null;
-}
-
-// DELETE записи по ключу.
-async function deleteRecord(key) {
-  const base = cachedSettings.databaseURL.replace(/\/+$/, "");
-  const path = (cachedSettings.databasePath || "commands/queue")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-  const url = base + "/" + path + "/" + key + ".json";
-  const resp = await fetch(url, { method: "DELETE" });
-  if (!resp.ok) {
-    throw new Error("HTTP " + resp.status + " при удалении тестовой записи");
-  }
-}
-
-// Тест соединения: POST тестовой записи + DELETE её. Если оба шага прошли — канал работает.
-async function testConnection(dbUrl, dbPath) {
-  if (dbUrl.indexOf("https://") !== 0) {
-    throw new Error("Database URL должен начинаться с https://");
-  }
-  if (dbUrl.indexOf("YOUR-PROJECT") !== -1) {
-    throw new Error("Подставьте реальный Database URL из Firebase Console.");
-  }
-
-  // Временно подменяем cachedSettings, чтобы postRecord использовала тестируемый URL.
-  const backup = Object.assign({}, cachedSettings);
-  cachedSettings.databaseURL = dbUrl;
-  cachedSettings.databasePath = dbPath;
-
-  try {
-    const testPayload = {
-      text: "__connection_test__",
-      timestamp: Date.now(),
-      source: "connection-test",
-      _test: true,
-    };
-    const name = await postRecord(testPayload);
-    if (!name) {
-      throw new Error("Firebase вернул пустой ответ на POST.");
-    }
-    await deleteRecord(name);
-    return name;
-  } finally {
-    // Возвращаем прежние настройки (финальное сохранение произойдёт отдельно, если тест прошёл).
-    cachedSettings = backup;
-  }
-}
-
-// ============================================================
 // UI helpers
 // ============================================================
-
-function showStatus(el, message, kind) {
-  el.textContent = message;
-  el.className = "status-line show " + (kind || "");
+function setNpStatus(message, kind) {
+  npStatus.textContent = message;
+  npStatus.className = "np-status" + (kind ? " " + kind : "");
+}
+function clearNpStatus() {
+  npStatus.textContent = "";
+  npStatus.className = "np-status";
 }
 
-function clearStatus(el) {
-  el.textContent = "";
-  el.className = "status-line";
+function formatTime(ts) {
+  const d = new Date(ts);
+  const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
 }
 
-function updateConnectionStatus() {
-  if (isConfigured()) {
-    connStatusEl.textContent = "подключён к " + cachedSettings.databaseURL;
-    connStatusEl.className = "conn-value ok";
-  } else {
-    connStatusEl.textContent = "не подключён";
-    connStatusEl.className = "conn-value err";
-  }
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function switchView(name) {
@@ -402,57 +203,12 @@ function switchView(name) {
       item.classList.remove("active");
     }
   });
-  if (name === "new-project") {
-    npPromptInput.focus();
-    clearNpStatus();
-  } else if (name === "workspace") {
-    cmdTextarea.focus();
-  } else if (name === "settings") {
-    dbUrlInput.focus();
-  }
-}
-
-function formatTime(ts) {
-  const d = new Date(ts);
-  const pad = (n) => (n < 10 ? "0" + n : "" + n);
-  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
-}
-
-function renderHistory() {
-  if (!history.length) {
-    historyList.innerHTML = '<li class="history-empty">Пока ничего не отправлено.</li>';
-    return;
-  }
-  historyList.innerHTML = history
-    .slice()
-    .map((item) => {
-      const pillClass = item.status === "ok" ? "" : " err";
-      const pillText = item.status === "ok" ? "ок" : "ошибка";
-      const errorLine = item.status === "ok" ? "" : '<div style="color:var(--error);font-size:11px;margin-top:4px;">' + escapeHtml(item.error || "") + "</div>";
-      return (
-        '<li class="history-item">' +
-        '<span class="time">' + formatTime(item.timestamp) + '</span>' +
-        '<span class="text">' + escapeHtml(item.text) + errorLine + '</span>' +
-        '<span class="status-pill' + pillClass + '">' + pillText + '</span>' +
-        '</li>'
-      );
-    })
-    .join("");
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 // ============================================================
 // Управление проектами (IndexedDB + sidebar + view)
 // ============================================================
 
-// Загрузка всех проектов из IndexedDB в память.
 async function loadProjects() {
   try {
     projects = await dbGetAllProjects();
@@ -465,7 +221,6 @@ async function loadProjects() {
 
 // Создаёт новый проект, добавляет в список и делает активным.
 async function createNewProject() {
-  // Дефолтное имя: «Новый проект» или «Новый проект N» если уже есть такие.
   let name = "Новый проект";
   let n = 1;
   const existing = projects.map((p) => p.name);
@@ -487,12 +242,12 @@ async function createNewProject() {
   await selectProject(project.id);
 }
 
-// Выбор проекта: делает активным, открывает вид, рендерит историю.
+// Выбор проекта: сохраняет блоки предыдущего, загружает блоки нового.
 async function selectProject(id) {
   const project = projects.find((p) => p.id === id);
   if (!project) return;
 
-  // Если проект не загружен полностью (history может быть пустой в кеше), подтягиваем.
+  // Подтягиваем полный объект из БД (на случай если в кеше только метаданные)
   if (!project.history || project.history.length === undefined) {
     try {
       const fresh = await dbGetProject(id);
@@ -505,6 +260,22 @@ async function selectProject(id) {
     }
   }
 
+  // ⚠️ ВАЖНО: сначала СОХРАНЯЕМ блоки СТАРОГО activeProject,
+  // потом переключаемся на новый, потом загружаем его блоки.
+  const prevProject = activeProject;
+  if (prevProject && prevProject.id !== id) {
+    if (typeof saveBlocklyState === 'function') {
+      saveBlocklyState(); // сохранит workspace (старые блоки) в prevProject
+    }
+    try {
+      await dbUpdateProject(prevProject);
+      console.log('[projects] saved prev project', prevProject.id, 'to DB');
+    } catch(e) {
+      console.warn('[projects] save prev to DB:', e);
+    }
+  }
+
+  // Переключаемся
   activeProjectId = id;
   activeProject = projects.find((p) => p.id === id) || project;
 
@@ -521,16 +292,16 @@ async function selectProject(id) {
   switchView("new-project");
   npPromptInput.focus();
 
-  // Сохраняем блоки предыдущего проекта, загружаем блоки нового
-  if (typeof saveBlocklyState === 'function') {
-    saveBlocklyState();
-  }
+  // ⚠️ КРИТИЧНО: загружаем блоки НОВОГО проекта в workspace.
+  // initBlockly() вызывается в init() ЕДИНОВРЕМЕННО при загрузке dashboard,
+  // поэтому blocklyWorkspace здесь уже не null — очистка и загрузка отработают.
   if (typeof loadBlocklyStateForProject === 'function') {
     loadBlocklyStateForProject(activeProject);
+  } else {
+    console.warn('[projects] loadBlocklyStateForProject not defined!');
   }
 }
 
-// Переименование активного проекта (по вводу в project-title-input).
 async function renameActiveProject(newName) {
   if (!activeProject) return;
   const name = (newName || "").trim() || "Без названия";
@@ -546,14 +317,12 @@ async function renameActiveProject(newName) {
   renderProjectsList();
 }
 
-// Удаление проекта по ID. После удаления выбираем следующий или показываем empty.
 async function deleteProject(id) {
   const project = projects.find((p) => p.id === id);
   if (!project) return;
 
-  // Простой confirm (Chrome extension pages поддерживают window.confirm).
   const ok = window.confirm(
-    'Удалить проект «' + (project.name || "Без названия") + '»? История команд будет потеряна.',
+    'Удалить проект «' + (project.name || "Без названия") + '»? История и блоки будут потеряны.',
   );
   if (!ok) return;
 
@@ -578,7 +347,6 @@ async function deleteProject(id) {
   renderProjectsList();
 }
 
-// Показывает empty state когда нет проектов.
 function showProjectEmptyState() {
   projectEmptyState.style.display = "flex";
   projectHeader.style.display = "none";
@@ -586,7 +354,6 @@ function showProjectEmptyState() {
   switchView("new-project");
 }
 
-// Рендерит список проектов в сайдбаре.
 function renderProjectsList() {
   if (!projects.length) {
     projectsList.innerHTML = '<li class="projects-empty">Нет проектов</li>';
@@ -609,13 +376,11 @@ function renderProjectsList() {
     .join("");
 }
 
-// Рендерит историю активного проекта в .project-history.
 function renderProjectHistory() {
   if (!activeProject || !activeProject.history || !activeProject.history.length) {
     projectHistoryEl.innerHTML = '<div class="project-history-empty">Команды появятся здесь после отправки</div>';
     return;
   }
-  // Логика как в диалоге: старые команды вверху, новые внизу.
   const items = activeProject.history.slice();
   projectHistoryEl.innerHTML = items
     .map((item) => {
@@ -631,7 +396,7 @@ function renderProjectHistory() {
       } else if (isResponse) {
         if (typeof item.exitCode === "number") {
           pillText = "exit " + item.exitCode;
-        } else if (item.error === "timeout" || item.error === "vscode_timeout") {
+        } else if (item.error === "timeout" || item.error === "native_timeout") {
           pillText = "таймаут";
         } else {
           pillText = item.status === "ok" ? "ок" : "ошибка";
@@ -660,7 +425,6 @@ function renderProjectHistory() {
       );
     })
     .join("");
-  // Автопрокрутка вниз — чтобы новая команда/ответ были видны.
   requestAnimationFrame(() => {
     projectHistoryEl.scrollTop = projectHistoryEl.scrollHeight;
   });
@@ -705,7 +469,6 @@ projectsList.addEventListener("click", async (e) => {
   }
 });
 
-// Двойной клик по имени проекта в сайдбаре → фокус на инпут названия в виде.
 projectsList.addEventListener("dblclick", (e) => {
   const nameBtn = e.target.closest('.project-name[data-action="select"]');
   if (!nameBtn) return;
@@ -713,7 +476,6 @@ projectsList.addEventListener("dblclick", (e) => {
   if (!li) return;
   const id = li.getAttribute("data-project-id");
   if (id !== activeProjectId) {
-    // Сначала выбираем, потом фокусируемся на инпуте.
     selectProject(id).then(() => {
       projectTitleInput.focus();
       projectTitleInput.select();
@@ -725,177 +487,208 @@ projectsList.addEventListener("dblclick", (e) => {
 });
 
 // ============================================================
-// Обработчики
+// Native Messaging: проверка связи с ОС-терминалом
 // ============================================================
 
-// Переключение видов по клику в сайдбаре (только для пунктов с data-view).
-// Кнопка «Новый проект» (без data-view) обрабатывается отдельно.
-navItems.forEach((item) => {
-  const view = item.getAttribute("data-view");
-  if (!view) return;
-  item.addEventListener("click", () => {
-    switchView(view);
-  });
-});
-
-// Кнопка «Подключить».
-async function handleConnect(e) {
-  e.preventDefault();
-  if (isTesting) return;
-
-  const dbUrl = dbUrlInput.value.trim();
-  const apiKey = apiKeyInput.value.trim();
-  const dbPath = dbPathInput.value.trim() || "commands/queue";
-  const source = sourceInput.value.trim() || "browser-extension";
-
-  clearStatus(settingsStatus);
-  isTesting = true;
-  connectBtn.disabled = true;
-  connectBtn.textContent = "Проверяю…";
-
+async function checkNativeHost() {
   try {
-    const testName = await testConnection(dbUrl, dbPath);
-    // Тест прошёл — сохраняем настройки.
-    await saveSettings({ databaseURL: dbUrl, apiKey: apiKey, databasePath: dbPath, source: source });
-    updateConnectionStatus();
-    showStatus(
-      settingsStatus,
-      "Подключено ✓ Канал работает (тестовая запись " + testName + " записана и удалена).",
-      "ok",
-    );
-    // Автопереход в Workspace через 700 мс.
-    setTimeout(() => {
-      switchView("workspace");
-      clearStatus(settingsStatus);
-    }, 700);
-  } catch (err) {
-    showStatus(settingsStatus, "Ошибка: " + err.message, "err");
-  } finally {
-    isTesting = false;
-    connectBtn.disabled = false;
-    connectBtn.textContent = "Подключить";
+    const resp = await chrome.runtime.sendMessage({ action: 'native_ping' });
+    nativeHostStatus = resp || { ok: false, error: 'нет ответа' };
+  } catch (e) {
+    nativeHostStatus = { ok: false, error: e.message };
   }
+  updateNativeHostStatus();
+  return nativeHostStatus;
 }
 
-// Кнопка «Сбросить» — очищает форму к дефолтам (но НЕ удаляет сохранённое).
-function handleReset() {
-  dbUrlInput.value = FIREBASE_DEFAULTS.databaseURL;
-  apiKeyInput.value = FIREBASE_DEFAULTS.apiKey;
-  dbPathInput.value = FIREBASE_DEFAULTS.databasePath;
-  sourceInput.value = FIREBASE_DEFAULTS.source;
-  clearStatus(settingsStatus);
-  dbUrlInput.focus();
-}
-
-// Отправка команды.
-async function handleSend() {
-  const text = cmdTextarea.value.trim();
-  if (!text) {
-    showStatus(sendStatus, "Введите текст команды.", "warn");
-    return;
-  }
-  if (!isConfigured()) {
-    showStatus(sendStatus, "Firebase не настроен. Откройте «Настройки».", "err");
-    return;
-  }
-
-  sendBtn.disabled = true;
-  showStatus(sendStatus, "Отправка…", "");
-
-  const payload = {
-    text: text,
-    timestamp: Date.now(),
-    source: cachedSettings.source || "browser-extension",
-  };
-
-  try {
-    const name = await postRecord(payload);
-    showStatus(sendStatus, "Отправлено ✓ (запись " + (name || "?") + ")", "ok");
-    // Логируем в историю.
-    const newHistory = [
-      { text: text, timestamp: payload.timestamp, status: "ok" },
-    ].concat(history);
-    await saveHistory(newHistory.slice(0, HISTORY_LIMIT));
-    renderHistory();
-  } catch (err) {
-    showStatus(sendStatus, "Ошибка: " + err.message, "err");
-    const newHistory = [
-      { text: text, timestamp: payload.timestamp, status: "err", error: err.message },
-    ].concat(history);
-    await saveHistory(newHistory.slice(0, HISTORY_LIMIT));
-    renderHistory();
-  } finally {
-    sendBtn.disabled = false;
-  }
-}
-
-function handleClear() {
-  cmdTextarea.value = "";
-  cmdTextarea.focus();
-  clearStatus(sendStatus);
-}
-
-// Горячие клавиши в textarea.
-function handleKeydown(e) {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    handleSend();
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-    e.preventDefault();
-    handleSend();
+function updateNativeHostStatus() {
+  if (!connStatusEl) return;
+  if (nativeHostStatus.ok) {
+    const info = nativeHostStatus.info || {};
+    const ver = info.version ? ' v' + info.version : '';
+    const plat = info.platform ? ' ' + info.platform : '';
+    connStatusEl.textContent = '✓ подключён' + ver + plat;
+    connStatusEl.className = 'conn-value ok';
+    if (reconnectBtn) reconnectBtn.classList.remove('show');
+  } else {
+    connStatusEl.textContent = '✗ ' + (nativeHostStatus.error || 'не установлен');
+    connStatusEl.className = 'conn-value err';
+    if (reconnectBtn) reconnectBtn.classList.add('show');
   }
 }
 
 // ============================================================
-// Новый проект — отправка из промпт-бара
+// Извлечение команды из ответа AI
+// AI-ответ содержит пояснения + код в блоках ```bash ... ```
 // ============================================================
+function extractCommandFromAIResponse(text) {
+  if (!text || typeof text !== 'string') return text;
 
-function setNpStatus(message, kind) {
-  npStatus.textContent = message;
-  npStatus.className = "np-status" + (kind ? " " + kind : "");
-}
-function clearNpStatus() {
-  npStatus.textContent = "";
-  npStatus.className = "np-status";
-}
+  console.log('[nezar-dash] extractCommand: analyzing AI response (len=' + text.length + ')');
 
-// Генерирует уникальный ID запроса для сопоставления команды и ответа.
-function generateRequestId() {
-  return "req_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-}
+  // 1. Code block: ```bash ... ``` или ```sh ... ``` или ``` ... ```
+  const codeBlockMatch = text.match(/```(?:bash|sh|shell|zsh|fish|console|terminal)?\s*\n?([\s\S]*?)```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    const cmd = codeBlockMatch[1].trim();
+    console.log('[nezar-dash] extractCommand: found code block, cmd=' + JSON.stringify(cmd.slice(0, 200)));
+    return cmd;
+  }
 
-// Опрашивает Firebase responses/<requestId>.json до появления ответа или таймаута.
-async function waitForResponse(requestId, timeoutMs) {
-  const baseUrl = (cachedSettings.databaseURL || "").replace(/\/+$/, "");
-  const url = baseUrl + "/responses/" + requestId + ".json";
-  const start = Date.now();
-  const intervalMs = 500;
-
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const resp = await fetch(url);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data !== null && data !== undefined) {
-          return data;
-        }
-      }
-    } catch (e) {
-      // сетевая ошибка — повтор через интервал.
+  // 2. Inline code: `command`
+  const inlineMatch = text.match(/`([^`\n]{2,200})`/);
+  if (inlineMatch && inlineMatch[1]) {
+    const cmd = inlineMatch[1].trim();
+    if (!cmd.match(/[.!?]/) && !cmd.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are)\s/i)) {
+      console.log('[nezar-dash] extractCommand: found inline code, cmd=' + JSON.stringify(cmd.slice(0, 200)));
+      return cmd;
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
   }
-  return null;
+
+  // 3. Если ответ начинается с известной команды — берём ВЕСЬ текст
+  //    (multi-line скрипт: ls + touch + heredoc + ...).
+  const lines = text.split('\n');
+  const knownCmds = [
+    'ls','cd','echo','cat','grep','find','mkdir','rmdir','rm','cp','mv','touch',
+    'chmod','chown','git','npm','npx','yarn','pnpm','node','python','python3','pip',
+    'pip3','curl','wget','ssh','scp','tar','zip','unzip','head','tail','wc','sort',
+    'uniq','awk','sed','ps','kill','df','du','free','top','htop','whoami','pwd',
+    'date','cal','which','whereis','man','sudo','apt','apt-get','brew','docker',
+    'docker-compose','kubectl','make','cmake','gcc','g++','clang','javac','java',
+    'go','cargo','rustc','dotnet','ruby','gem','php','composer','lua','perl',
+    'sqlite3','mysql','psql','redis-cli','mongo','mongosh','code','vim','nano',
+    'export','source','alias','history','clear','reset','hostname','ifconfig',
+    'ip','ping','traceroute','netstat','ss','lsof','systemctl','journalctl',
+    'crontab','at','nohup','screen','tmux','xargs','tee','diff','patch','file',
+    'stat','basename','dirname','readlink','realpath','tree','du','nc','jq','yq',
+  ];
+  const firstNonEmpty = lines.find(l => l.trim());
+  if (firstNonEmpty) {
+    const firstWord = firstNonEmpty.trim().split(/[\s|=]/)[0];
+    if (knownCmds.includes(firstWord)) {
+      console.log('[nezar-dash] extractCommand: response starts with "' + firstWord + '" — using FULL text');
+      return text.trim();
+    }
+  }
+
+  // 4. Первая строка-команда
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+    const firstWord = trimmed.split(/[\s|=]/)[0];
+    if (knownCmds.includes(firstWord)) {
+      console.log('[nezar-dash] extractCommand: found known command line, cmd=' + JSON.stringify(trimmed.slice(0, 200)));
+      return trimmed;
+    }
+  }
+
+  // 5. Fallback: первая строка без точек/вопросительных
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.match(/[.!?]/)) continue;
+    if (trimmed.length > 300) continue;
+    if (trimmed.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are|here|please|sure)\s/i)) continue;
+    if (trimmed.match(/^[-*•]\s/)) continue;
+    console.log('[nezar-dash] extractCommand: fallback first plausible line');
+    return trimmed;
+  }
+
+  console.log('[nezar-dash] extractCommand: no extraction found, using full text');
+  return text.trim();
 }
 
 // ============================================================
-// AI-режим: DeepSeek/Qwen/GLM → ответ → Firebase → VSCode
+// AI-режим: DeepSeek/Qwen/GLM
 // ============================================================
+
+async function checkAITab() {
+  console.log('[nezar-dash] checkAITab called');
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: "find_ai_tab" });
+    aiTabStatus = resp || { ok: false, error: "нет ответа" };
+  } catch (e) {
+    aiTabStatus = { ok: false, error: e.message };
+  }
+  updateAIStatus();
+  return aiTabStatus;
+}
+
+function updateAIStatus() {
+  if (!aiStatusEl) return;
+  if (aiTabStatus.ok) {
+    aiStatusEl.textContent = "✓ " + aiTabStatus.site + " найден";
+    aiStatusEl.className = "ai-status ok";
+  } else {
+    aiStatusEl.textContent = "✗ " + (aiTabStatus.error || "не найден");
+    aiStatusEl.className = "ai-status err";
+  }
+}
+
+function toggleAIMode() {
+  aiMode = !aiMode;
+  if (aiToggleBtn) {
+    aiToggleBtn.textContent = "AI режим: " + (aiMode ? "ВКЛ" : "ВЫКЛ");
+    aiToggleBtn.className = "ai-toggle" + (aiMode ? " on" : "");
+  }
+  if (aiMode) {
+    checkAITab();
+  }
+}
+
+// Ждёт ответ от AI (answer_complete или answer_error от background).
+function waitForAIResponse(timeoutMs) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const handler = (msg, sender, sendResponse) => {
+      if (resolved) return false;
+      if (msg.action === "answer_complete") {
+        resolved = true;
+        chrome.runtime.onMessage.removeListener(handler);
+        if (abortChecker) clearInterval(abortChecker);
+        if (msg.think) console.log('[nezar-dash] AI THINK:', msg.think);
+        sendResponse({ ok: true });
+        resolve({ text: msg.text || "", think: msg.think || "" });
+      } else if (msg.action === "answer_error") {
+        resolved = true;
+        chrome.runtime.onMessage.removeListener(handler);
+        if (abortChecker) clearInterval(abortChecker);
+        sendResponse({ ok: true });
+        resolve(null);
+      } else if (msg.action === "answer_chunk" && msg.phase === "streaming" && msg.text) {
+        setNpStatus("AI отвечает… " + msg.text.length + " символов", "");
+      }
+      return false;
+    };
+    chrome.runtime.onMessage.addListener(handler);
+
+    // ⚡ Abort-checker: раз в 200мс проверяем blocklyAbortFlag.
+    // Если выставлен — прерываем ожидание AI, резолвим с null.
+    // (blocklyAbortFlag — глобальная из blockly.js, доступна здесь)
+    let abortChecker = setInterval(() => {
+      if (resolved) return;
+      if (typeof blocklyAbortFlag !== 'undefined' && blocklyAbortFlag) {
+        resolved = true;
+        chrome.runtime.onMessage.removeListener(handler);
+        clearInterval(abortChecker);
+        console.log('[nezar-dash] waitForAIResponse: ABORTED by user');
+        resolve(null);
+      }
+    }, 200);
+
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        chrome.runtime.onMessage.removeListener(handler);
+        if (abortChecker) clearInterval(abortChecker);
+        resolve(null);
+      }
+    }, timeoutMs);
+  });
+}
 
 // Показывает индикатор "AI думает..." в чате (три прыгающих точки).
-// Добавляется прямо в DOM, не сохраняется в IndexedDB.
 function showProcessingIndicator(site) {
-  hideProcessingIndicator(); // убираем предыдущий если был
+  hideProcessingIndicator();
   const div = document.createElement('div');
   div.className = 'ph-item role-ai processing-indicator';
   div.id = 'processing-indicator';
@@ -910,13 +703,11 @@ function showProcessingIndicator(site) {
     '<span class="typing-text"> ' + (site || 'AI') + ' генерирует ответ…</span>' +
     '</div>';
   projectHistoryEl.appendChild(div);
-  // Прокручиваем вниз чтобы индикатор был виден.
   requestAnimationFrame(() => {
     projectHistoryEl.scrollTop = projectHistoryEl.scrollHeight;
   });
 }
 
-// Убирает индикатор "AI думает...".
 function hideProcessingIndicator() {
   const el = document.getElementById('processing-indicator');
   if (el) el.remove();
@@ -937,185 +728,8 @@ async function addHistoryEntry(entry) {
 }
 
 // ============================================================
-// Извлечение команды из ответа AI
-// AI-ответ содержит пояснения + код в блоках ```bash ... ```
-// Нужно вытащить только команду, иначе терминал получит стихи :)
+// Отправка: блоки / AI / прямой терминал
 // ============================================================
-function extractCommandFromAIResponse(text) {
-  if (!text || typeof text !== 'string') return text;
-
-  console.log('[nezar-dash] extractCommand: analyzing AI response (len=' + text.length + ')');
-
-  // 1. Ищем code block: ```bash ... ``` или ```sh ... ``` или ``` ... ```
-  const codeBlockMatch = text.match(/```(?:bash|sh|shell|zsh|fish|console|terminal)?\s*\n?([\s\S]*?)```/i);
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    const cmd = codeBlockMatch[1].trim();
-    console.log('[nezar-dash] extractCommand: found code block, cmd=' + JSON.stringify(cmd.slice(0, 200)));
-    return cmd;
-  }
-
-  // 2. Ищем inline code: `command`
-  const inlineMatch = text.match(/`([^`\n]{2,200})`/);
-  if (inlineMatch && inlineMatch[1]) {
-    const cmd = inlineMatch[1].trim();
-    // Проверяем что это похоже на команду (не предложение)
-    if (!cmd.match(/[.!?]/) && !cmd.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are)\s/i)) {
-      console.log('[nezar-dash] extractCommand: found inline code, cmd=' + JSON.stringify(cmd.slice(0, 200)));
-      return cmd;
-    }
-  }
-
-  // 3. Если НЕТ code block, но ответ начинается с известной команды —
-  // возвращаем ВЕСЬ текст (это multi-line скрипт: ls + touch + heredoc + ...).
-  // Не вырезаем только первую строку — теряем остальные команды!
-  const lines = text.split('\n');
-  const knownCmds = [
-    'ls','cd','echo','cat','grep','find','mkdir','rmdir','rm','cp','mv','touch',
-    'chmod','chown','git','npm','npx','yarn','pnpm','node','python','python3','pip',
-    'pip3','curl','wget','ssh','scp','tar','zip','unzip','head','tail','wc','sort',
-    'uniq','awk','sed','ps','kill','df','du','free','top','htop','whoami','pwd',
-    'date','cal','which','whereis','man','sudo','apt','apt-get','brew','docker',
-    'docker-compose','kubectl','make','cmake','gcc','g++','clang','javac','java',
-    'go','cargo','rustc','dotnet','ruby','gem','php','composer','lua','perl',
-    'sqlite3','mysql','psql','redis-cli','mongo','mongosh','code','vim','nano',
-    'export','source','alias','history','clear','reset','hostname','ifconfig',
-    'ip','ping','traceroute','netstat','ss','lsof','systemctl','journalctl',
-    'crontab','at','nohup','screen','tmux','xargs','tee','diff','patch','file',
-    'stat','basename','dirname','readlink','realpath','tree','du','nc','jq','yq',
-  ];
-  const firstNonEmpty = lines.find(l => l.trim());
-  if (firstNonEmpty) {
-    const firstWord = firstNonEmpty.trim().split(/[\s|=]/)[0];
-    if (knownCmds.includes(firstWord)) {
-      console.log('[nezar-dash] extractCommand: response starts with "' + firstWord + '" — using FULL text (multi-line script)');
-      return text.trim();
-    }
-  }
-
-  // 4. Ищем строки, начинающиеся с известных команд (fallback — если первые строки
-  // были пояснением, берём первую строку-команду).
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
-    const firstWord = trimmed.split(/[\s|=]/)[0];
-    if (knownCmds.includes(firstWord)) {
-      console.log('[nezar-dash] extractCommand: found known command line, cmd=' + JSON.stringify(trimmed.slice(0, 200)));
-      return trimmed;
-    }
-  }
-
-  // 5. Fallback: первая строка без точек/вопросительных (не предложение)
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (trimmed.match(/[.!?]/)) continue;          // похоже на предложение
-    if (trimmed.length > 300) continue;             // слишком длинно
-    if (trimmed.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are|here|please|sure)\s/i)) continue;
-    if (trimmed.match(/^[-*•]\s/)) continue;        // markdown list item
-    console.log('[nezar-dash] extractCommand: fallback first plausible line, cmd=' + JSON.stringify(trimmed.slice(0, 200)));
-    return trimmed;
-  }
-
-  // 5. Last resort: весь текст (лучше чем ничего)
-  console.log('[nezar-dash] extractCommand: no extraction found, using full text');
-  return text.trim();
-}
-
-// Проверяет, есть ли открытая вкладка AI-чата.
-async function checkAITab() {
-  console.log('[nezar-dash] checkAITab called');
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: "find_ai_tab" });
-    console.log('[nezar-dash] checkAITab response:', resp);
-    aiTabStatus = resp || { ok: false, error: "нет ответа" };
-  } catch (e) {
-    console.error('[nezar-dash] checkAITab error:', e);
-    aiTabStatus = { ok: false, error: e.message };
-  }
-  updateAIStatus();
-  return aiTabStatus;
-}
-
-// Обновляет индикатор статуса AI-вкладки.
-function updateAIStatus() {
-  if (!aiStatusEl) return;
-  if (aiTabStatus.ok) {
-    aiStatusEl.textContent = "✓ " + aiTabStatus.site + " найден";
-    aiStatusEl.className = "ai-status ok";
-  } else {
-    aiStatusEl.textContent = "✗ " + (aiTabStatus.error || "не найден");
-    aiStatusEl.className = "ai-status err";
-  }
-}
-
-// Переключатель AI-режима.
-function toggleAIMode() {
-  aiMode = !aiMode;
-  if (aiToggleBtn) {
-    aiToggleBtn.textContent = "AI режим: " + (aiMode ? "ВКЛ" : "ВЫКЛ");
-    aiToggleBtn.className = "ai-toggle" + (aiMode ? " on" : "");
-  }
-  if (aiMode) {
-    checkAITab();
-  }
-}
-
-// Ждёт ответ от AI (answer_complete или answer_error от background).
-// Возвращает { text, think } или null при таймауте/ошибке.
-function waitForAIResponse(timeoutMs) {
-  console.log('[nezar-dash] waitForAIResponse START, timeout=' + timeoutMs + 'ms');
-  return new Promise((resolve) => {
-    let resolved = false;
-
-    const handler = (msg, sender, sendResponse) => {
-      console.log('[nezar-dash] waitForAIResponse handler got message:', msg.action, 'phase=' + (msg.phase||''), 'textLen=' + (msg.text||'').length, 'resolved=' + resolved);
-      if (resolved) {
-        console.log('[nezar-dash] already resolved, skipping');
-        return false;
-      }
-      if (msg.action === "answer_complete") {
-        resolved = true;
-        chrome.runtime.onMessage.removeListener(handler);
-        console.log('[nezar-dash] AI COMPLETE! textLen=' + (msg.text||'').length);
-        console.log('[nezar-dash] ═══════════════════════════════════════════');
-        console.log('[nezar-dash] AI RESPONSE TEXT:');
-        console.log(msg.text || '(пустой ответ)');
-        console.log('[nezar-dash] ═══════════════════════════════════════════');
-        if (msg.think) {
-          console.log('[nezar-dash] AI THINK:');
-          console.log(msg.think);
-        }
-        if (msg.note) console.log('[nezar-dash] AI note:', msg.note);
-        sendResponse({ ok: true });
-        resolve({ text: msg.text || "", think: msg.think || "" });
-      } else if (msg.action === "answer_error") {
-        resolved = true;
-        chrome.runtime.onMessage.removeListener(handler);
-        console.log('[nezar-dash] AI ERROR:', msg.error);
-        sendResponse({ ok: true });
-        resolve(null);
-      } else if (msg.action === "answer_chunk" && msg.phase === "streaming" && msg.text) {
-        console.log('[nezar-dash] AI streaming chunk: ' + msg.text.length + ' chars');
-        setNpStatus("AI отвечает… " + msg.text.length + " символов", "");
-      } else if (msg.action === "answer_chunk" && msg.phase === "waiting") {
-        console.log('[nezar-dash] AI waiting phase (DeepSeek получил промпт)');
-      }
-      return false;
-    };
-
-    chrome.runtime.onMessage.addListener(handler);
-    console.log('[nezar-dash] waitForAIResponse listener ADDED');
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        chrome.runtime.onMessage.removeListener(handler);
-        console.log('[nezar-dash] waitForAIResponse TIMEOUT — no answer in ' + timeoutMs + 'ms');
-        resolve(null);
-      }
-    }, timeoutMs);
-  });
-}
 
 async function handleNewProjectSend() {
   const text = npPromptInput.value.trim();
@@ -1124,12 +738,12 @@ async function handleNewProjectSend() {
     npPromptInput.focus();
     return;
   }
-  if (!isConfigured()) {
-    setNpStatus("Firebase не настроен — откройте «Настройки».", "err");
+  if (!activeProject) {
+    setNpStatus("Сначала создайте проект.", "err");
     return;
   }
-  if (!activeProject) {
-    setNpStatus("Сначала создайте проект (кнопка «Новый проект»).", "err");
+  if (!nativeHostStatus.ok) {
+    setNpStatus("Native host не подключён — терминал недоступен.", "err");
     return;
   }
 
@@ -1146,10 +760,10 @@ async function handleNewProjectSend() {
     return;
   }
 
-  const requestId = generateRequestId();
+  const requestId = "req_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
   const now = Date.now();
 
-  // 1. Промпт пользователя — всегда добавляем в чат (role: "user").
+  // 1. Промпт пользователя — всегда в чат
   await addHistoryEntry({
     role: "user",
     text: text,
@@ -1163,95 +777,82 @@ async function handleNewProjectSend() {
   npPromptInput.value = "";
   npPromptInput.focus();
 
-  // ---- Если есть узлы цепочки — запускаем pipeline ----
-  if (pipelineNodes.length > 0) {
-    console.log('[nezar-dash] pipeline has ' + pipelineNodes.length + ' nodes — running pipeline');
-    await runPipeline(text);
-    return;
-  }
-
-  // ---- Ветвление: AI-режим или прямой ----
-
+  // 2. Ветвление: AI-режим или прямой терминал
   if (aiMode) {
-    // AI-режим: промпт → DeepSeek → ответ → Firebase → VSCode.
     await handleSendWithAI(text, requestId);
   } else {
-    // Прямой режим: промпт → Firebase → VSCode (как раньше).
     await handleSendDirect(text, requestId, now);
   }
 
   npSendBtn.disabled = false;
 }
 
-// Прямой режим (без AI): отправка команды в Firebase, ожидание ответа VSCode.
+// Прямой режим: промпт → Native Messaging терминал.
 async function handleSendDirect(text, requestId, now) {
-  const payload = {
-    text: text,
-    timestamp: now,
-    source: cachedSettings.source || "browser-extension",
-    requestId: requestId,
-  };
+  setNpStatus("Выполнение команды в терминале…", "");
 
-  setNpStatus("Отправка команды…", "");
-
+  let resp;
   try {
-    await postRecord(payload);
-    setNpStatus("Команда выполнена. Ожидание вывода из терминала…", "");
-
-    const response = await waitForResponse(requestId, 60000);
-
-    if (response) {
-      const exitCode = response.exitCode;
-      const hasError = response.error || (typeof exitCode === "number" && exitCode !== 0);
-      await addHistoryEntry({
-        role: "assistant",
-        text: response.output || "(нет вывода)",
-        timestamp: response.timestamp || Date.now(),
-        status: hasError ? "err" : "ok",
-        exitCode: exitCode,
-        error: response.error,
-        requestId: requestId,
-      });
-      setNpStatus("✓ Ответ получен" + (typeof exitCode === "number" ? " (exit " + exitCode + ")" : ""), "ok");
-    } else {
-      await addHistoryEntry({
-        role: "assistant",
-        text: "(таймаут — VSCode не ответил за 60с)",
-        timestamp: Date.now(),
-        status: "err",
-        error: "timeout",
-        requestId: requestId,
-      });
-      setNpStatus("Таймаут ожидания ответа", "err");
-    }
-
-    // Лог в общую историю Workspace.
-    const newHistory = [{ text: text, timestamp: now, status: "ok" }].concat(history);
-    await saveHistory(newHistory.slice(0, HISTORY_LIMIT));
-    renderHistory();
-
-    setTimeout(() => { clearNpStatus(); }, 2500);
-  } catch (err) {
-    setNpStatus("Ошибка: " + err.message, "err");
-    const last = activeProject.history[activeProject.history.length - 1];
-    if (last && last.requestId === requestId && last.role === "user") {
-      last.status = "err";
-      last.error = err.message;
-      try { await dbUpdateProject(activeProject); } catch (e) {}
-      renderProjectHistory();
-    }
+    resp = await chrome.runtime.sendMessage({
+      action: 'native_run',
+      command: text,
+      cwd: null,
+      timeout: 60000,
+    });
+  } catch (e) {
+    setNpStatus("Ошибка: " + e.message, "err");
+    await addHistoryEntry({
+      role: "assistant",
+      text: "(ошибка: " + e.message + ")",
+      timestamp: Date.now(),
+      status: "err",
+      error: e.message,
+      requestId: requestId,
+    });
+    return;
   }
+
+  if (!resp || !resp.ok) {
+    const errMsg = (resp && resp.error) || 'неизвестная ошибка';
+    const partialOut = resp && (resp.stdout || resp.stderr)
+      ? ((resp.stdout || '') + (resp.stderr ? '\n[stderr]\n' + resp.stderr : ''))
+      : '';
+    setNpStatus("Ошибка: " + errMsg, "err");
+    await addHistoryEntry({
+      role: "assistant",
+      text: partialOut || ("(ошибка: " + errMsg + ")"),
+      timestamp: Date.now(),
+      status: "err",
+      error: errMsg,
+      requestId: requestId,
+    });
+    return;
+  }
+
+  const stdout = resp.stdout || '';
+  const stderr = resp.stderr || '';
+  const exitCode = resp.exitCode;
+  const output = (stderr ? stdout + '\n[stderr]\n' + stderr : stdout) || '(нет вывода)';
+  const hasError = typeof exitCode === 'number' && exitCode !== 0;
+
+  await addHistoryEntry({
+    role: "assistant",
+    text: output,
+    timestamp: Date.now(),
+    status: hasError ? "err" : "ok",
+    exitCode: exitCode,
+    requestId: requestId,
+  });
+  setNpStatus("✓ Готово" + (typeof exitCode === "number" ? " (exit " + exitCode + ")" : ""), "ok");
+  setTimeout(() => { clearNpStatus(); }, 2500);
 }
 
-// AI-режим: промпт → DeepSeek → ответ AI → Firebase (как команда) → VSCode.
+// AI-режим: промпт → DeepSeek → ответ AI → извлечение команды → Native терминал.
 async function handleSendWithAI(text, requestId) {
-  console.log('[nezar-dash] handleSendWithAI START, textLen=' + text.length + ' requestId=' + requestId);
+  console.log('[nezar-dash] handleSendWithAI START');
 
-  // Проверяем AI-вкладку.
   const tabInfo = await checkAITab();
-  console.log('[nezar-dash] tabInfo:', tabInfo);
   if (!tabInfo.ok) {
-    console.log('[nezar-dash] NO AI tab — aborting');
     setNpStatus("Нет вкладки AI. Откройте chat.deepseek.com.", "err");
     await addHistoryEntry({
       role: "ai",
@@ -1265,15 +866,11 @@ async function handleSendWithAI(text, requestId) {
   }
 
   setNpStatus("Отправка промпта в " + tabInfo.site + "…", "");
-  console.log('[nezar-dash] sending prompt to AI via background...');
 
-  // Отправляем промпт в AI через background → content script.
   let sendResp;
   try {
     sendResp = await chrome.runtime.sendMessage({ action: "send_to_ai", text: text });
-    console.log('[nezar-dash] send_to_ai response:', sendResp);
   } catch (e) {
-    console.error('[nezar-dash] send_to_ai FAILED:', e);
     setNpStatus("Ошибка отправки в AI: " + e.message, "err");
     await addHistoryEntry({
       role: "ai",
@@ -1287,7 +884,6 @@ async function handleSendWithAI(text, requestId) {
   }
 
   if (!sendResp || !sendResp.ok) {
-    console.error('[nezar-dash] send_to_ai returned not ok:', sendResp);
     setNpStatus("AI не принял промпт: " + (sendResp?.error || "неизвестно"), "err");
     await addHistoryEntry({
       role: "ai",
@@ -1299,23 +895,15 @@ async function handleSendWithAI(text, requestId) {
     });
     return;
   }
-  console.log('[nezar-dash] prompt sent to AI successfully, response:', sendResp.response);
 
-  // Показываем индикатор "AI думает..." в чате.
   showProcessingIndicator(tabInfo.site);
-
-  // Ждём ответ от AI (стримится через background).
   setNpStatus("AI думает…", "");
-  const AI_TIMEOUT = 90000;
-  console.log('[nezar-dash] calling waitForAIResponse(' + AI_TIMEOUT + ')...');
-  const aiResponse = await waitForAIResponse(AI_TIMEOUT);
-  console.log('[nezar-dash] waitForAIResponse returned:', aiResponse ? ('textLen=' + aiResponse.text.length) : 'null');
 
-  // Убираем индикатор — ответ получен (или таймаут/ошибка).
+  const AI_TIMEOUT = 90000;
+  const aiResponse = await waitForAIResponse(AI_TIMEOUT);
   hideProcessingIndicator();
 
   if (!aiResponse || !aiResponse.text) {
-    console.log('[nezar-dash] AI response null/empty — timeout or error');
     setNpStatus("Таймаут AI — не ответил за " + (AI_TIMEOUT / 1000) + "с", "err");
     await addHistoryEntry({
       role: "ai",
@@ -1328,9 +916,7 @@ async function handleSendWithAI(text, requestId) {
     return;
   }
 
-  console.log('[nezar-dash] AI responded! textLen=' + aiResponse.text.length + ' adding to chat...');
-
-  // AI ответил — добавляем в чат (role: "ai"). Полный текст — для пользователя.
+  // AI ответил — полный текст в чат
   await addHistoryEntry({
     role: "ai",
     text: aiResponse.text,
@@ -1339,297 +925,82 @@ async function handleSendWithAI(text, requestId) {
     requestId: requestId,
     think: aiResponse.think,
   });
-  console.log('[nezar-dash] AI response added to chat, now extracting command...');
 
   setNpStatus("Извлечение команды из ответа AI…", "");
-
-  // Извлекаем только команду из ответа AI (не отправляем стихи в терминал :)
   const extractedCmd = extractCommandFromAIResponse(aiResponse.text);
-  console.log('[nezar-dash] ═══════════════════════════════════════════');
-  console.log('[nezar-dash] EXTRACTED COMMAND for VSCode:');
-  console.log(extractedCmd);
-  console.log('[nezar-dash] ═══════════════════════════════════════════');
 
   if (!extractedCmd || extractedCmd.length === 0) {
-    console.log('[nezar-dash] extraction returned empty — aborting');
     setNpStatus("Не удалось извлечь команду из ответа AI", "err");
     return;
   }
 
-  setNpStatus("Отправка команды в VSCode…", "");
+  setNpStatus("Выполнение команды в терминале…", "");
 
-  // Отправляем ИЗВЛЕЧЁННУЮ команду (не весь ответ AI) в Firebase.
-  const cmdPayload = {
-    text: extractedCmd,
-    timestamp: Date.now(),
-    source: "ai-" + tabInfo.site,
-    requestId: requestId,
-  };
-  console.log('[nezar-dash] posting extracted command to Firebase...');
-
+  let resp;
   try {
-    await postRecord(cmdPayload);
-    console.log('[nezar-dash] posted to Firebase, waiting for VSCode response...');
-    setNpStatus("Команда отправлена. Ожидание вывода терминала…", "");
-
-    // Ждём ответ от VSCode.
-    const vscodeResp = await waitForResponse(requestId, 60000);
-    console.log('[nezar-dash] VSCode response:', vscodeResp ? ('outputLen=' + (vscodeResp.output||'').length) : 'null');
-
-    if (vscodeResp) {
-      const exitCode = vscodeResp.exitCode;
-      const hasError = vscodeResp.error || (typeof exitCode === "number" && exitCode !== 0);
-      await addHistoryEntry({
-        role: "assistant",
-        text: vscodeResp.output || "(нет вывода)",
-        timestamp: vscodeResp.timestamp || Date.now(),
-        status: hasError ? "err" : "ok",
-        exitCode: exitCode,
-        error: vscodeResp.error,
-        requestId: requestId,
-      });
-      setNpStatus("✓ Готово" + (typeof exitCode === "number" ? " (exit " + exitCode + ")" : ""), "ok");
-    } else {
-      await addHistoryEntry({
-        role: "assistant",
-        text: "(таймаут — VSCode не ответил за 60с)",
-        timestamp: Date.now(),
-        status: "err",
-        error: "vscode_timeout",
-        requestId: requestId,
-      });
-      setNpStatus("Таймаут VSCode", "err");
-    }
-
-    setTimeout(() => { clearNpStatus(); }, 3000);
-  } catch (err) {
-    console.error('[nezar-dash] post to Firebase failed:', err);
-    setNpStatus("Ошибка отправки в VSCode: " + err.message, "err");
+    resp = await chrome.runtime.sendMessage({
+      action: 'native_run',
+      command: extractedCmd,
+      cwd: null,
+      timeout: 60000,
+    });
+  } catch (e) {
+    setNpStatus("Ошибка терминала: " + e.message, "err");
     await addHistoryEntry({
       role: "assistant",
-      text: "(ошибка: " + err.message + ")",
+      text: "(ошибка: " + e.message + ")",
       timestamp: Date.now(),
       status: "err",
-      error: err.message,
+      error: e.message,
       requestId: requestId,
     });
-  }
-}
-
-// ============================================================
-// Инициализация
-// ============================================================
-
-// ============================================================
-// Pipeline (Цепочка): конструктор + выполнение
-// Результаты идут в чат проекта (addHistoryEntry), не в отдельный контейнер.
-// ============================================================
-
-function savePipeline() {
-  if (chrome && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.set({ pipelineNodes: pipelineNodes });
-  }
-}
-function loadPipeline() {
-  return new Promise((resolve) => {
-    if (!chrome || !chrome.storage || !chrome.storage.local) { resolve(); return; }
-    chrome.storage.local.get(["pipelineNodes"], (stored) => {
-      pipelineNodes = Array.isArray(stored.pipelineNodes) ? stored.pipelineNodes : [];
-      renderPipelineNodes();
-      resolve();
-    });
-  });
-}
-
-// Toggle правой панели.
-function togglePipelinePanel() {
-  const isOpen = pipelinePanel.style.display !== "none";
-  if (isOpen) {
-    pipelinePanel.style.display = "none";
-    pipelineToggleBtn.classList.remove("active");
-    document.getElementById("view-new-project").classList.remove("pipeline-open");
-  } else {
-    pipelinePanel.style.display = "flex";
-    pipelineToggleBtn.classList.add("active");
-    document.getElementById("view-new-project").classList.add("pipeline-open");
-  }
-}
-
-function addPipelineNode(type) {
-  let name = "";
-  let url = "";
-  if (type === "ai") {
-    url = prompt("Вставьте URL вкладки AI чата:", "https://chat.deepseek.com");
-    if (!url || !url.trim()) return;
-    url = url.trim();
-    const defName = url.includes("deepseek") ? "DeepSeek" : url.includes("qwen") ? "Qwen" : url.includes("z.ai") ? "GLM" : "AI";
-    name = prompt("Название узла:", defName + " #" + (pipelineNodes.filter(n => n.type === "ai").length + 1));
-    if (name === null) return;
-    name = (name || "").trim() || defName;
-  } else {
-    name = "VSCode терминал";
-  }
-  pipelineNodes.push({
-    id: "node_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
-    type: type, name: name, url: type === "ai" ? url : "",
-  });
-  savePipeline();
-  renderPipelineNodes();
-}
-
-function removePipelineNode(id) {
-  pipelineNodes = pipelineNodes.filter(n => n.id !== id);
-  savePipeline();
-  renderPipelineNodes();
-}
-
-function movePipelineNode(id, dir) {
-  const idx = pipelineNodes.findIndex(n => n.id === id);
-  if (idx === -1) return;
-  const ni = idx + dir;
-  if (ni < 0 || ni >= pipelineNodes.length) return;
-  [pipelineNodes[idx], pipelineNodes[ni]] = [pipelineNodes[ni], pipelineNodes[idx]];
-  savePipeline();
-  renderPipelineNodes();
-}
-
-function renderPipelineNodes() {
-  if (!pipelineNodesEl) return;
-  if (!pipelineNodes.length) {
-    pipelineNodesEl.innerHTML = '<div class="pipeline-empty">Нет узлов.</div>';
     return;
   }
-  const parts = [];
-  for (let i = 0; i < pipelineNodes.length; i++) {
-    const node = pipelineNodes[i];
-    const icon = node.type === "ai" ? "🟦" : "</>";
-    const urlLine = node.type === "ai" && node.url
-      ? '<div class="pipeline-node-url">' + escapeHtml(node.url.slice(0, 40)) + '</div>'
-      : '<div class="pipeline-node-url">терминал</div>';
-    if (i > 0) parts.push('<div class="pipeline-arrow">↓</div>');
-    // Используем data-action вместо onclick — CSP MV3 блокирует inline-обработчики.
-    parts.push(
-      '<div class="pipeline-node" data-node-id="' + escapeHtml(node.id) + '">' +
-      '<div class="pipeline-node-num">' + (i + 1) + '</div>' +
-      '<div class="pipeline-node-icon">' + icon + '</div>' +
-      '<div class="pipeline-node-info">' +
-      '<div class="pipeline-node-name">' + escapeHtml(node.name) + '</div>' +
-      urlLine +
-      '</div>' +
-      '<div class="pipeline-node-actions">' +
-      '<button data-action="up" data-node-id="' + escapeHtml(node.id) + '" title="Вверх">↑</button>' +
-      '<button data-action="down" data-node-id="' + escapeHtml(node.id) + '" title="Вниз">↓</button>' +
-      '<button data-action="delete" data-node-id="' + escapeHtml(node.id) + '" class="danger" title="Удалить">×</button>' +
-      '</div></div>'
-    );
-  }
-  pipelineNodesEl.innerHTML = parts.join('');
-}
 
-// Event delegation для кнопок узлов (вместо onclick — CSP MV3 запрещает inline).
-if (pipelineNodesEl) {
-  pipelineNodesEl.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-action]");
-    if (!btn) return;
-    const action = btn.getAttribute("data-action");
-    const nodeId = btn.getAttribute("data-node-id");
-    if (!nodeId) return;
-    if (action === "up") movePipelineNode(nodeId, -1);
-    else if (action === "down") movePipelineNode(nodeId, 1);
-    else if (action === "delete") removePipelineNode(nodeId);
+  if (!resp || !resp.ok) {
+    const errMsg = (resp && resp.error) || 'неизвестная ошибка';
+    const partialOut = resp && (resp.stdout || resp.stderr)
+      ? ((resp.stdout || '') + (resp.stderr ? '\n[stderr]\n' + resp.stderr : ''))
+      : '';
+    setNpStatus("Ошибка: " + errMsg, "err");
+    await addHistoryEntry({
+      role: "assistant",
+      text: partialOut || ("(ошибка: " + errMsg + ")"),
+      timestamp: Date.now(),
+      status: "err",
+      error: errMsg,
+      requestId: requestId,
+    });
+    return;
+  }
+
+  const stdout = resp.stdout || '';
+  const stderr = resp.stderr || '';
+  const exitCode = resp.exitCode;
+  const output = (stderr ? stdout + '\n[stderr]\n' + stderr : stdout) || '(нет вывода)';
+  const hasError = typeof exitCode === 'number' && exitCode !== 0;
+
+  await addHistoryEntry({
+    role: "assistant",
+    text: output,
+    timestamp: Date.now(),
+    status: hasError ? "err" : "ok",
+    exitCode: exitCode,
+    requestId: requestId,
   });
+  setNpStatus("✓ Готово" + (typeof exitCode === "number" ? " (exit " + exitCode + ")" : ""), "ok");
+  setTimeout(() => { clearNpStatus(); }, 3000);
 }
 
-// Выполнение цепочки — результаты в чат проекта через addHistoryEntry.
-async function runPipeline(promptText) {
-  if (pipelineRunning) return false;
-  if (!pipelineNodes.length) return false;
-  if (!isConfigured()) {
-    setNpStatus("Firebase не настроен.", "err");
-    return false;
-  }
-
-  pipelineRunning = true;
-  npSendBtn.disabled = true;
-
-  // Шаг 0: промпт пользователя — уже добавлен в handleNewProjectSend.
-
-  let currentData = promptText;
-  let aborted = false;
-
-  for (let i = 0; i < pipelineNodes.length && !aborted; i++) {
-    const node = pipelineNodes[i];
-    console.log('[nezar-pipeline] step ' + (i+1) + ': ' + node.type + ' "' + node.name + '"');
-    setNpStatus("Шаг " + (i+1) + "/" + pipelineNodes.length + ": " + node.name + "…", "");
-
-    // Показываем индикатор для AI узлов.
-    if (node.type === "ai") showProcessingIndicator(node.name);
-
-    try {
-      if (node.type === "ai") {
-        const tabResp = await chrome.runtime.sendMessage({ action: "find_tab_by_url", url: node.url });
-        if (!tabResp || !tabResp.ok) {
-          hideProcessingIndicator();
-          await addHistoryEntry({ role: "ai", text: "(вкладка не найдена: " + node.name + ")", timestamp: Date.now(), status: "err", nodeName: node.name });
-          aborted = true; break;
-        }
-        const sendResp = await chrome.runtime.sendMessage({ action: "send_to_specific_tab", tabId: tabResp.tabId, text: currentData, site: tabResp.site });
-        if (!sendResp || !sendResp.ok) {
-          hideProcessingIndicator();
-          await addHistoryEntry({ role: "ai", text: "(ошибка отправки: " + node.name + ")", timestamp: Date.now(), status: "err", nodeName: node.name });
-          aborted = true; break;
-        }
-        setNpStatus(node.name + " думает…", "");
-        const aiResp = await waitForAIResponse(90000);
-        hideProcessingIndicator();
-        if (!aiResp || !aiResp.text) {
-          await addHistoryEntry({ role: "ai", text: "(таймаут AI: " + node.name + ")", timestamp: Date.now(), status: "err", nodeName: node.name });
-          aborted = true; break;
-        }
-        await addHistoryEntry({ role: "ai", text: aiResp.text, timestamp: Date.now(), status: "ok", nodeName: node.name, requestId: "pipeline_" + i });
-        const nextNode = pipelineNodes[i + 1];
-        currentData = (nextNode && nextNode.type === "vscode")
-          ? extractCommandFromAIResponse(aiResp.text)
-          : aiResp.text;
-
-      } else if (node.type === "vscode") {
-        const reqId = generateRequestId();
-        await postRecord({ text: currentData, timestamp: Date.now(), source: "pipeline", requestId: reqId });
-        setNpStatus(node.name + " выполняет…", "");
-        const vsResp = await waitForResponse(reqId, 60000);
-        if (vsResp) {
-          const hasErr = vsResp.error || (typeof vsResp.exitCode === "number" && vsResp.exitCode !== 0);
-          await addHistoryEntry({ role: "assistant", text: vsResp.output || "(нет вывода)", timestamp: Date.now(), status: hasErr ? "err" : "ok", exitCode: vsResp.exitCode, nodeName: node.name, requestId: reqId });
-          currentData = vsResp.output || "";
-        } else {
-          await addHistoryEntry({ role: "assistant", text: "(таймаут VSCode)", timestamp: Date.now(), status: "err", nodeName: node.name });
-          aborted = true; break;
-        }
-      }
-    } catch (err) {
-      hideProcessingIndicator();
-      await addHistoryEntry({ role: "ai", text: "(ошибка: " + err.message + ")", timestamp: Date.now(), status: "err", nodeName: node.name });
-      aborted = true;
-    }
-  }
-
-  setNpStatus(aborted ? "Цепочка прервана." : "✓ Цепочка завершена", aborted ? "err" : "ok");
-  if (!aborted) setTimeout(() => { clearNpStatus(); }, 3000);
-
-  pipelineRunning = false;
-  npSendBtn.disabled = false;
-  return !aborted;
-}
-
-// --- Сворачивание/разворачивание сайдбара ---
-
+// ============================================================
+// Сворачивание/разворачивание сайдбара
+// ============================================================
 function setSidebarCollapsed(collapsed) {
   if (collapsed) {
     document.body.classList.add("sidebar-collapsed");
   } else {
     document.body.classList.remove("sidebar-collapsed");
   }
-  // Сохраняем состояние, чтобы при следующем открытии оно сохранялось.
   if (chrome && chrome.storage && chrome.storage.local) {
     chrome.storage.local.set({ sidebarCollapsed: collapsed });
   }
@@ -1640,7 +1011,6 @@ function toggleSidebar() {
   setSidebarCollapsed(!isCollapsed);
 }
 
-// Загрузка сохранённого состояния сайдбара.
 function loadSidebarState() {
   return new Promise((resolve) => {
     if (!chrome || !chrome.storage || !chrome.storage.local) {
@@ -1649,49 +1019,41 @@ function loadSidebarState() {
     }
     chrome.storage.local.get(["sidebarCollapsed"], (stored) => {
       const collapsed = !!stored.sidebarCollapsed;
-      if (collapsed) {
-        document.body.classList.add("sidebar-collapsed");
-      }
+      if (collapsed) document.body.classList.add("sidebar-collapsed");
       resolve(collapsed);
     });
   });
 }
 
+// ============================================================
+// Инициализация
+// ============================================================
 async function init() {
-  await loadSettings();
-  await loadHistory();
   await loadSidebarState();
-  await loadPipeline();
   await loadProjects();
 
-  // Заполняем форму текущими сохранёнными значениями.
-  dbUrlInput.value = cachedSettings.databaseURL || "";
-  apiKeyInput.value = cachedSettings.apiKey || "";
-  dbPathInput.value = cachedSettings.databasePath || "commands/queue";
-  sourceInput.value = cachedSettings.source || "browser-extension";
+  // ⚠️ КРИТИЧНО: инициализируем Blockly ЕДИНОВРЕМЕННО при загрузке dashboard,
+  // чтобы blocklyWorkspace был готов ДО первого selectProject.
+  // Панель видна по умолчанию (display:flex в HTML).
+  if (typeof initBlockly === 'function') {
+    initBlockly();
+  } else {
+    console.warn('[nezar-dash] initBlockly not defined!');
+  }
 
-  updateConnectionStatus();
-  renderHistory();
+  // Проверяем связь с native host.
+  await checkNativeHost();
 
   // Логика первичного экрана:
-  // - Не настроено → Настройки.
-  // - Настроено + есть проекты → открываем последний проект.
-  // - Настроено + нет проектов → empty state в проект-виде.
-  if (!isConfigured()) {
-    switchView("settings");
-  } else if (projects.length > 0) {
+  // - Есть проекты → открываем последний.
+  // - Нет проектов → empty state.
+  if (projects.length > 0) {
     await selectProject(projects[0].id);
   } else {
     showProjectEmptyState();
   }
 
-  // События.
-  settingsForm.addEventListener("submit", handleConnect);
-  resetBtn.addEventListener("click", handleReset);
-  sendBtn.addEventListener("click", handleSend);
-  clearBtn.addEventListener("click", handleClear);
-  cmdTextarea.addEventListener("keydown", handleKeydown);
-  // Новый проект: кнопка и Enter в инпуте.
+  // События
   npSendBtn.addEventListener("click", handleNewProjectSend);
   npPromptInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -1699,46 +1061,40 @@ async function init() {
       handleNewProjectSend();
     }
   });
-  // Создание нового проекта.
   newProjectBtn.addEventListener("click", createNewProject);
   emptyStateCreateBtn.addEventListener("click", createNewProject);
-  // AI-режим: переключатель.
-  if (aiToggleBtn) {
-    aiToggleBtn.addEventListener("click", toggleAIMode);
-  }
-  // Pipeline: кнопки панели.
-  if (pipelineToggleBtn) pipelineToggleBtn.addEventListener("click", togglePipelinePanel);
-  if (pipelinePanelClose) pipelinePanelClose.addEventListener("click", togglePipelinePanel);
-  if (pipelineAddAIBtn) pipelineAddAIBtn.addEventListener("click", () => addPipelineNode("ai"));
-  if (pipelineAddVSCodeBtn) pipelineAddVSCodeBtn.addEventListener("click", () => addPipelineNode("vscode"));
-  // Переименование активного проекта по изменению инпута заголовка.
+  if (aiToggleBtn) aiToggleBtn.addEventListener("click", toggleAIMode);
+
   projectTitleInput.addEventListener("change", () => {
     renameActiveProject(projectTitleInput.value);
   });
   projectTitleInput.addEventListener("blur", () => {
     renameActiveProject(projectTitleInput.value);
   });
-  // Enter в инпуте названия → сохранить + убрать фокус.
   projectTitleInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       projectTitleInput.blur();
     } else if (e.key === "Escape") {
-      // Отмена — возвращаем сохранённое имя.
       if (activeProject) projectTitleInput.value = activeProject.name || "Новый проект";
       projectTitleInput.blur();
     }
   });
-  // Сайдбар: сворачивание/разворачивание.
+
   sidebarCollapseBtn.addEventListener("click", toggleSidebar);
   sidebarExpandBtn.addEventListener("click", toggleSidebar);
-  // Горячая клавиша: Ctrl/Cmd+B переключает сайдбар.
+  if (reconnectBtn) reconnectBtn.addEventListener("click", checkNativeHost);
+
+  // Ctrl/Cmd+B переключает сайдбар.
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
       e.preventDefault();
       toggleSidebar();
     }
   });
+
+  // Периодическая проверка native host (раз в 30 сек)
+  setInterval(checkNativeHost, 30000);
 }
 
 init();

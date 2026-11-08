@@ -9,7 +9,7 @@
  *   5. Native Messaging: связь с ОС-терминалом через com.nezar.host.
  */
 
-const AI_HOSTS = ['chat.deepseek.com', 'chat.qwen.ai', 'chat.z.ai'];
+const AI_HOSTS = ['chat.deepseek.com', 'chat.qwen.ai', 'chat.z.ai', 'alice.yandex.ru', 'yandex.ru/alice'];
 const NATIVE_HOST_NAME = 'com.nezar.host';
 
 // ============================================================
@@ -188,13 +188,16 @@ async function findAITab() {
   console.log('[nezar-bg] NO AI tab found among', tabs.length, 'tabs');
   const aiTabs = tabs.filter(t => t.url && AI_HOSTS.some(h => t.url.includes(h)));
   console.log('[nezar-bg] tabs matching AI hosts:', aiTabs.map(t => ({id: t.id, url: t.url, status: t.status})));
-  return { ok: false, error: 'Нет открытой вкладки DeepSeek/Qwen/GLM. Откройте chat.deepseek.com.' };
+  return { ok: false, error: 'Нет открытой вкладки AI. Откройте chat.deepseek.com / chat.qwen.ai / chat.z.ai / alice.yandex.ru.' };
 }
 
 function hostToSite(host) {
   if (host.includes('deepseek.com')) return 'deepseek';
   if (host.includes('qwen.ai'))     return 'qwen';
   if (host.includes('z.ai'))        return 'glm';
+  if (host.includes('alice.yandex.ru')) return 'alice';
+  if (host.includes('yandex.ru/alice')) return 'alice';
+  if (host.includes('ya.ru/alice'))     return 'alice';
   return 'unknown';
 }
 

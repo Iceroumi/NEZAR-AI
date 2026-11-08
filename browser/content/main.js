@@ -16,9 +16,13 @@
 
   function detectSite() {
     const host = location.hostname;
+    const path = location.pathname || '';
     if (host.includes('deepseek.com')) return 'deepseek';
     if (host.includes('qwen.ai'))     return 'qwen';
     if (host.includes('z.ai'))        return 'glm';
+    if (host.includes('alice.yandex.ru')) return 'alice';
+    // yandex.ru/alice или ya.ru/alice — альтернативные URL Алисы
+    if ((host.includes('yandex.ru') || host.includes('ya.ru')) && path.includes('alice')) return 'alice';
     return null;
   }
 
@@ -41,13 +45,16 @@
         'div[class*="send"]',
       ],
       answer: [
+        // ТОЛЬКО основной ответ. НЕ добавляем 'div.ds-message:last-of-type .ds-markdown'
+        // потому что он матчит И think, И answer — think попадал в result последним
+        // и выбираался как "latest answer".
         'div.ds-markdown.ds-assistant-message-main-content',
         '.ds-assistant-message-main-content',
-        'div.ds-message:last-of-type .ds-markdown',
       ],
       think: [
         'div.ds-think-content .ds-markdown',
         'div.ds-think-content',
+        'div.e1675d8b',  // новый класс-обёртка think (см. HTML пользователя)
       ],
       isComplete: function(latestAnswerEl) {
         if (!latestAnswerEl) return false;
@@ -91,6 +98,90 @@
           'button[aria-label="Поделиться"], ' +
           'button[aria-label="Share"], ' +
           'button.qwen-chat-package-comp-new-action-control-container-share'
+        );
+      },
+    },
+
+    // Яндекс Алиса — alice.yandex.ru
+    // HTML-структура ответа (из предоставленного пользователем сниппета):
+    //   <div class="AliceChat-Message" data-testid="alice-chat-message">
+    //     <div class="Message" data-message-role="alice" data-request-id="...">
+    //       <div class="MessageBubble-Container MessageBubble-Container_type_text">
+    //         <div class="MessageBubble">
+    //           <div class="AliceTextBubbleAnimated">
+    //             <div class="MarkdownText MarkdownText_no-bottom-margin">
+    //               <div class="FuturisMarkdown" translate="no">
+    //                 <div data-end-streaming-block="true"></div>  ← маркер конца стрима
+    //                 <p>...ответ...</p>
+    //               </div>
+    //             </div>
+    //           </div>
+    //         </div>
+    //         <span data-testid="message-completion-marker" aria-hidden="true"></span>  ← маркер завершения
+    //         <div class="StandaloneContextMenu-Container">  ← контекстное меню (появляется когда готов ответ)
+    //           <button data-testid="share-response-button">  ← кнопка "Поделиться"
+    //           <button data-testid="context-menu_good-answer-button">  ← "Хороший ответ"
+    //         </div>
+    //       </div>
+    //     </div>
+    //   </div>
+    alice: {
+      editor: [
+        // У Алисы поле ввода — обычно textarea внутри .AliceChat-Input
+        'textarea[data-testid="alice-chat-input"]',
+        'textarea.AliceChat-Input',
+        'textarea[placeholder*="Спросите" i]',
+        'textarea[placeholder*="Алиса" i]',
+        'textarea[placeholder*="Чем помочь" i]',
+        'textarea[placeholder*="сообщен" i]',
+        // Иногда может быть contenteditable
+        'div[contenteditable="true"][class*="alice" i]',
+        'div[contenteditable="true"]',
+        'textarea',
+      ],
+      sendBtn: [
+        'button[data-testid="alice-chat-send-button"]',
+        'button[data-testid="send-button"]',
+        'button.AliceButton_send',
+        'button[aria-label="Отправить"]',
+        'button[aria-label*="send" i]',
+        'button[aria-label*="отправ" i]',
+        'button[type="submit"]',
+        'div[role="button"][aria-label*="Отправить"]',
+      ],
+      answer: [
+        // Основной markdown-контент ответа Алисы.
+        // ВАЖНО: НЕ берём .FuturisMarkdown внутри user-сообщений — только внутри alice-сообщений.
+        'div[data-message-role="alice"] .FuturisMarkdown',
+        'div.AliceTextBubbleAnimated .FuturisMarkdown',
+        'div.MarkdownText .FuturisMarkdown',
+        // Fallback — последний .FuturisMarkdown на странице
+        'div.FuturisMarkdown',
+      ],
+      think: [
+        // У Алисы есть режим "размышления" (think card), но в видимом HTML пользователя его не было.
+        // Подстрахуемся на будущее — если появится блок с такими классами, isInsideThink его отфильтрует.
+        'div[data-testid*="think" i]',
+        'div[class*="think-card"]',
+        'div[class*="reasoning"]',
+      ],
+      isComplete: function(latestAnswerEl) {
+        if (!latestAnswerEl) return false;
+        // Ищем контейнер сообщения Алисы (внутри которого есть маркеры завершения)
+        const message = latestAnswerEl.closest('[data-message-role="alice"]') ||
+                        latestAnswerEl.closest('.AliceChat-Message') ||
+                        latestAnswerEl.closest('.Message') ||
+                        latestAnswerEl.parentElement?.parentElement?.parentElement?.parentElement;
+        if (!message) return false;
+        // Три независимых маркера завершения — любой из них означает что ответ готов:
+        // 1. data-end-streaming-block="true" — внутри .FuturisMarkdown (маркер конца стрима)
+        // 2. data-testid="message-completion-marker" — span после .MessageBubble
+        // 3. button[data-testid="share-response-button"] — кнопка "Поделиться" в контекстном меню
+        return !!message.querySelector(
+          '[data-end-streaming-block="true"], ' +
+          '[data-testid="message-completion-marker"], ' +
+          'button[data-testid="share-response-button"], ' +
+          'button[data-testid="context-menu_good-answer-button"]'
         );
       },
     },
@@ -262,17 +353,72 @@
     return null;
   }
 
+  // ⚡ КРИТИЧНО: проверяет, находится ли элемент внутри блока размышления (think).
+  // Возвращает true если среди предков элемента есть think-контейнер.
+  // Это предотвращает попадание "Thought for N seconds" в ответ AI.
+  function isInsideThink(el) {
+    if (!el || !el.parentElement) return false;
+    // Способ 1: используем closest() с cfg.think селекторами — самый надёжный.
+    if (cfg.think) {
+      for (const sel of cfg.think) {
+        try {
+          if (el.closest(sel)) return true;
+        } catch (e) { /* невалидный селектор — пропускаем */ }
+      }
+    }
+    // Способ 2: проверяем классы предков напрямую (substring match).
+    // Страховка на случай если DeepSeek/Qwen переименуют классы.
+    const THINK_CLASS_HINTS = [
+      'think-content',       // DeepSeek: ds-think-content
+      'thinking',            // Qwen: qwen-chat-thinking-...
+      'reasoning',           // общий паттерн
+      'think-block',
+      'cot-block',           // chain-of-thought
+      '_767406f',            // DeepSeek хеш-класс think-обёртки
+      'e1675d8b',            // DeepSeek хеш-класс think-обёртки
+    ];
+    let node = el.parentElement;
+    let depth = 0;
+    while (node && depth < 12) { // не глубже 12 предков — достаточно
+      const cls = node.className;
+      if (cls && typeof cls === 'string') {
+        const lower = cls.toLowerCase();
+        for (const hint of THINK_CLASS_HINTS) {
+          if (lower.includes(hint)) return true;
+        }
+      }
+      // Также проверяем data-атрибуты (некоторые сайты маркируют через data-*)
+      if (node.dataset) {
+        if (node.dataset.role === 'thinking' ||
+            node.dataset.thinking === 'true' ||
+            node.dataset.reasoning === 'true') {
+          return true;
+        }
+      }
+      node = node.parentElement;
+      depth++;
+    }
+    return false;
+  }
+
   function findAnswerElements() {
     const result = [];
     const seen = new Set();
+    let filteredThink = 0;
 
     // 1. Специфичные селекторы из конфига (быстрые, но хрупкие).
     for (const sel of cfg.answer) {
       document.querySelectorAll(sel).forEach(el => {
-        if (!seen.has(el)) {
-          seen.add(el);
-          result.push(el);
+        if (seen.has(el)) return;
+        // ⚡ ФИЛЬТР: отбрасываем элементы внутри think-блоков
+        if (isInsideThink(el)) {
+          filteredThink++;
+          console.log('[nezar-content] FILTERED OUT think element:', sel,
+            'class:', (el.className || '').slice(0, 60));
+          return;
         }
+        seen.add(el);
+        result.push(el);
       });
     }
 
@@ -294,13 +440,17 @@
         // Роль-based
         'div[data-role="assistant"]',
         'div[data-message-author-role="assistant"]',
-        // Очень broad — любой div с >100 символами текста (фильтруем ниже)
       ];
       for (const sel of broadSelectors) {
         document.querySelectorAll(sel).forEach(el => {
           if (seen.has(el)) return;
+          // ⚡ ФИЛЬТР think для broad selectors тоже
+          if (isInsideThink(el)) {
+            filteredThink++;
+            return;
+          }
           const text = (el.textContent || '').trim();
-          if (text.length > 50) { // только substantial элементы
+          if (text.length > 50) {
             seen.add(el);
             result.push(el);
             console.log('[nezar-content] broad selector matched:', sel, 'textLen=' + text.length);
@@ -309,7 +459,8 @@
       }
     }
 
-    console.log('[nezar-content] findAnswerElements: found ' + result.length + ' elements');
+    console.log('[nezar-content] findAnswerElements: found ' + result.length +
+                ' elements, filtered think: ' + filteredThink);
     return result;
   }
 
@@ -319,9 +470,15 @@
     const allDivs = document.querySelectorAll('div, section, article');
     let best = null;
     let bestLen = 0;
+    let skippedThink = 0;
     for (const el of allDivs) {
       // Пропускаем маленькие элементы и элементы ввода
       if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') continue;
+      // ⚡ ФИЛЬТР think — даже в very-broad fallback не берём think-блоки
+      if (isInsideThink(el)) {
+        skippedThink++;
+        continue;
+      }
       const ownText = (el.textContent || '').trim();
       // Ищем элементы с substantial текстом, но без слишком многих детей
       // (чтобы не взять весь body)
@@ -331,7 +488,8 @@
       }
     }
     if (best) {
-      console.log('[nezar-content] findAnswerVeryBroad: found element with ' + bestLen + ' chars');
+      console.log('[nezar-content] findAnswerVeryBroad: found element with ' + bestLen +
+                  ' chars (skipped think: ' + skippedThink + ')');
     }
     return best;
   }
@@ -502,16 +660,22 @@
 
       // --- ФАЗА 2: стримим текст ответа (из кэшированного элемента) ---
       // Используем кэшированный элемент, не ищем заново — это стабилизирует текст.
-      // Если элемент удалился из DOM (DeepSeek перерисовал), ищем заново.
-      if (!cachedAnswerEl || !document.contains(cachedAnswerEl)) {
-        console.log('[nezar-content] cached element lost, re-finding...');
+      // Если элемент удалился из DOM (DeepSeek перерисовал) ИЛИ оказался внутри
+      // think-блока (DOM перерисовался и наш ответ "уехал" в think) — ищем заново.
+      if (!cachedAnswerEl || !document.contains(cachedAnswerEl) || isInsideThink(cachedAnswerEl)) {
+        if (cachedAnswerEl && isInsideThink(cachedAnswerEl)) {
+          console.log('[nezar-content] cached element ended up inside think — re-finding (skip think)...');
+        } else if (!cachedAnswerEl || !document.contains(cachedAnswerEl)) {
+          console.log('[nezar-content] cached element lost, re-finding...');
+        }
         const answers = findAnswerElements();
         cachedAnswerEl = answers.length > 0 ? answers[answers.length - 1] : null;
         if (!cachedAnswerEl) {
           cachedAnswerEl = findAnswerVeryBroad();
         }
         if (cachedAnswerEl) {
-          console.log('[nezar-content] re-found element:', cachedAnswerEl?.tagName, cachedAnswerEl?.className?.slice(0,60));
+          console.log('[nezar-content] re-found element:', cachedAnswerEl?.tagName, cachedAnswerEl?.className?.slice(0,60),
+            'insideThink=' + isInsideThink(cachedAnswerEl));
         }
       }
 

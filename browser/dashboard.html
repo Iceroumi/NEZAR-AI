@@ -3,13 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Firebase Bridge</title>
+<title>NEZAR</title>
 <link rel="icon" type="image/png" href="icons/icon128.png" />
 <link rel="icon" type="image/png" sizes="48x48" href="icons/icon48.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png" />
 <style>
   :root {
-    /* Палитра из вашего style.css */
     --grad-from: #121212;
     --grad-to: #1D2128;
     --glass: rgba(43, 49, 59, 0.4);
@@ -33,6 +32,7 @@
     --radius-md: 8px;
     --radius-sm: 4px;
     --sidebar-w: 240px;
+    --blockly-width: 480px;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   * { box-sizing: border-box; }
@@ -46,24 +46,20 @@
   }
   body {
     display: flex;
-    /* Тёмный фон из вашего style.css */
     background: var(--grad-from);
   }
 
-  /* ===== Sidebar (glass, collapsible) ===== */
+  /* ===== Sidebar ===== */
   .sidebar {
     flex: 0 0 var(--sidebar-w);
     overflow: hidden;
-    transition: flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.2s ease;
+    transition: flex-basis 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
   }
   body.sidebar-collapsed .sidebar {
     flex-basis: 0;
     opacity: 0;
     pointer-events: none;
   }
-  /* Внутренний контейнер фиксирует ширину, чтобы при сворачивании
-     содержимое не сжималось, а аккуратно обрезалось. */
   .sidebar-inner {
     width: var(--sidebar-w);
     height: 100vh;
@@ -91,10 +87,7 @@
     box-shadow: 0 4px 12px var(--green-shadow);
   }
   .brand .logo svg { width: 100%; height: 100%; display: block; }
-  .brand .titles {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
+  .brand .titles { flex: 1 1 auto; min-width: 0; }
   .brand .title {
     font-weight: 600;
     font-size: 15px;
@@ -105,7 +98,6 @@
     color: var(--text-dim);
     margin-top: 2px;
   }
-  /* Кнопка сворачивания в шапке сайдбара */
   .sidebar-collapse-btn {
     flex: 0 0 auto;
     width: 28px;
@@ -120,16 +112,9 @@
     justify-content: center;
     transition: background 0.15s ease, color 0.15s ease;
   }
-  .sidebar-collapse-btn:hover {
-    background: var(--glass);
-    color: var(--text);
-  }
-  .sidebar-collapse-btn svg {
-    width: 16px;
-    height: 16px;
-  }
+  .sidebar-collapse-btn:hover { background: var(--glass); color: var(--text); }
+  .sidebar-collapse-btn svg { width: 16px; height: 16px; }
 
-  /* Плавающая кнопка разворачивания (видна только когда сайдбар свёрнут) */
   .sidebar-expand-btn {
     position: absolute;
     top: 16px;
@@ -149,17 +134,9 @@
     justify-content: center;
     transition: background 0.15s ease, transform 0.15s ease;
   }
-  .sidebar-expand-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    transform: scale(1.05);
-  }
-  .sidebar-expand-btn svg {
-    width: 18px;
-    height: 18px;
-  }
-  body.sidebar-collapsed .sidebar-expand-btn {
-    display: flex;
-  }
+  .sidebar-expand-btn:hover { background: rgba(255, 255, 255, 0.15); transform: scale(1.05); }
+  .sidebar-expand-btn svg { width: 18px; height: 18px; }
+  body.sidebar-collapsed .sidebar-expand-btn { display: flex; }
 
   nav.nav {
     padding: 16px 10px;
@@ -184,24 +161,16 @@
     margin-bottom: 4px;
     transition: background 0.15s ease, color 0.15s ease;
   }
-  .nav-item:hover {
-    background: var(--glass);
-    color: var(--text);
-  }
+  .nav-item:hover { background: var(--glass); color: var(--text); }
   .nav-item.active {
     background: var(--green-soft);
     color: #fff;
     box-shadow: 0 4px 12px var(--green-shadow);
   }
-  .nav-item .ico {
-    font-size: 18px;
-    width: 20px;
-    text-align: center;
-    flex: 0 0 auto;
-  }
-  .nav-item .label {
-    flex: 1 1 auto;
-  }
+  .nav-item .ico { font-size: 18px; width: 20px; text-align: center; flex: 0 0 auto; }
+  .nav-item .label { flex: 1 1 auto; }
+
+  .nav-divider { height: 1px; background: var(--glass-border); margin: 8px 10px; }
 
   .sidebar-footer {
     padding: 14px 18px;
@@ -218,8 +187,22 @@
   }
   .sidebar-footer .conn-value.ok { color: var(--success); }
   .sidebar-footer .conn-value.err { color: var(--error); }
+  .sidebar-footer .conn-value.warn { color: var(--warn); }
+  .sidebar-footer .reconnect-btn {
+    margin-top: 6px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 10px;
+    cursor: pointer;
+    display: none;
+  }
+  .sidebar-footer .reconnect-btn:hover { background: var(--glass-strong); color: var(--text); }
+  .sidebar-footer .reconnect-btn.show { display: inline-block; }
 
-  /* ===== Content area ===== */
+  /* ===== Content ===== */
   .content {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -228,237 +211,12 @@
   .view { display: none; }
   .view.active { display: block; }
 
-  /* ===== Settings & Workspace shared styles ===== */
-  .padded-view {
-    padding: 48px 56px;
-    max-width: 920px;
-  }
-  .padded-view h1 {
-    font-size: 26px;
-    font-weight: 600;
-    margin: 0 0 6px;
-    letter-spacing: -0.3px;
-  }
-  .padded-view .lead {
-    color: var(--text-dim);
-    margin: 0 0 32px;
-    font-size: 14px;
-  }
-  .padded-view h2 {
-    font-size: 16px;
-    font-weight: 600;
-    margin: 36px 0 14px;
-  }
-
-  /* Glass cards */
-  .glass-card {
-    background: var(--glass);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    padding: 24px;
-  }
-
-  /* Form fields */
-  .field { margin-bottom: 18px; }
-  .field label {
-    display: block;
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-    font-weight: 500;
-  }
-  .field .hint {
-    font-size: 11px;
-    color: var(--text-mute);
-    margin-top: 6px;
-  }
-  .field input[type="text"],
-  .field input[type="password"],
-  .field textarea {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md);
-    padding: 12px 14px;
-    font-size: 14px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    outline: none;
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
-  .field input::placeholder,
-  .field textarea::placeholder {
-    color: var(--text-mute);
-  }
-  .field input:focus,
-  .field textarea:focus {
-    border-color: var(--green);
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  /* Buttons */
-  .btn {
-    border: none;
-    border-radius: var(--radius-md);
-    padding: 12px 22px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    font-family: inherit;
-    transition: all 0.15s ease;
-  }
-  .btn-primary {
-    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
-    color: #fff;
-    box-shadow: 0 4px 12px var(--green-shadow);
-  }
-  .btn-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px var(--green-shadow);
-  }
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-  .btn-ghost {
-    background: var(--glass);
-    color: var(--text-dim);
-    border: 1px solid var(--glass-border);
-  }
-  .btn-ghost:hover {
-    background: var(--glass-strong);
-    color: var(--text);
-  }
-  .btn-row {
-    display: flex;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  .btn-row .btn-primary { min-width: 160px; }
-
-  /* Status messages */
-  .status-line {
-    font-size: 13px;
-    margin-top: 16px;
-    padding: 12px 14px;
-    border-radius: var(--radius-md);
-    background: var(--glass);
-    color: var(--text-dim);
-    display: none;
-    border: 1px solid var(--glass-border);
-  }
-  .status-line.show { display: block; }
-  .status-line.ok {
-    background: rgba(76, 175, 80, 0.1);
-    color: var(--success);
-    border-color: rgba(76, 175, 80, 0.3);
-  }
-  .status-line.err {
-    background: rgba(244, 67, 54, 0.1);
-    color: var(--error);
-    border-color: rgba(244, 67, 54, 0.3);
-  }
-  .status-line.warn {
-    background: rgba(255, 152, 0, 0.1);
-    color: var(--warn);
-    border-color: rgba(255, 152, 0, 0.3);
-  }
-
-  /* Workspace textarea */
-  .workspace-textarea {
-    width: 100%;
-    min-height: 140px;
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    padding: 16px;
-    font-size: 14px;
-    font-family: "SF Mono", Menlo, Consolas, "Cascadia Code", monospace;
-    outline: none;
-    resize: vertical;
-    transition: border-color 0.15s ease;
-  }
-  .workspace-textarea:focus { border-color: var(--green); }
-  .workspace-textarea::placeholder { color: var(--text-mute); }
-
-  .kbd-hint {
-    font-size: 11px;
-    color: var(--text-mute);
-    margin-top: 10px;
-  }
-  .kbd {
-    background: var(--glass-strong);
-    border: 1px solid var(--glass-border);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 10px;
-  }
-
-  /* History list */
-  .history {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    background: var(--glass);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    max-height: 360px;
-    overflow-y: auto;
-  }
-  .history-item {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--glass-border);
-    font-size: 13px;
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-  }
-  .history-item:last-child { border-bottom: none; }
-  .history-item .time {
-    flex: 0 0 auto;
-    color: var(--text-mute);
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-  }
-  .history-item .text {
-    flex: 1 1 auto;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    word-break: break-all;
-  }
-  .history-item .status-pill {
-    flex: 0 0 auto;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: var(--success);
-    color: #fff;
-    font-weight: 500;
-  }
-  .history-item .status-pill.err { background: var(--error); }
-  .history-empty {
-    padding: 32px 16px;
-    text-align: center;
-    color: var(--text-mute);
-    font-size: 13px;
-  }
-
-  /* ============================================================
-     NEW PROJECT view — дизайн из вашего CSS
-     ============================================================ */
+  /* ===== NEW PROJECT view — split chat | blockly ===== */
   #view-new-project {
     position: relative;
     height: 100vh;
     overflow: hidden;
-  }
-  /* Flex split: чат слева, блоки справа */
-  #view-new-project.blockly-open {
+    /* По умолчанию блоки открыты — Blockly инициализируется сразу */
     display: flex;
     flex-direction: row;
   }
@@ -469,7 +227,6 @@
     overflow: hidden;
     min-width: 0;
   }
-  /* Ресайзер между чатом и блоками */
   .np-resizer {
     flex: 0 0 6px;
     cursor: ew-resize;
@@ -478,14 +235,10 @@
     z-index: 50;
     transition: background 0.15s ease;
   }
-  .np-resizer:hover {
-    background: var(--accent);
-  }
-  .np-resizer.active {
-    background: var(--accent);
-  }
+  .np-resizer:hover { background: var(--accent); }
+  .np-resizer.active { background: var(--accent); }
   .np-blockly-side {
-    flex: 0 0 var(--blockly-width, 480px);
+    flex: 0 0 var(--blockly-width);
     position: relative;
     height: 100vh;
     overflow: hidden;
@@ -494,7 +247,10 @@
     display: flex;
     flex-direction: column;
   }
-  /* Иконка как полупрозрачный водяной знак, центрирована */
+  body.blockly-closed #view-new-project { display: block; }
+  body.blockly-closed .np-resizer { display: none; }
+  body.blockly-closed .np-blockly-side { display: none; }
+
   .np-watermark {
     position: absolute;
     width: 220px;
@@ -507,524 +263,6 @@
   }
   .np-watermark svg { width: 100%; height: 100%; display: block; }
 
-  /* Заголовок над промптом */
-  .np-header {
-    position: absolute;
-    top: 64px;
-    left: 50%;
-    transform: translateX(-50%);
-    text-align: center;
-    z-index: 2;
-  }
-  .np-header h1 {
-    font-size: 32px;
-    font-weight: 600;
-    margin: 0 0 8px;
-    letter-spacing: -0.5px;
-  }
-  .np-header p {
-    margin: 0;
-    color: var(--text-dim);
-    font-size: 14px;
-  }
-
-  /* Контейнер промпта — прижат к низу */
-  .np-prompt-wrap {
-    position: absolute;
-    bottom: 56px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 719px;
-    max-width: calc(100% - 80px);
-    z-index: 2;
-  }
-
-  /* Стеклянная панель промпта */
-  .np-prompt-bar {
-    box-sizing: border-box;
-    height: 56px;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    display: flex;
-    align-items: center;
-    padding: 6px 6px 6px 20px;
-    gap: 12px;
-    transition: border-color 0.15s ease;
-  }
-  .np-prompt-bar:focus-within {
-    border-color: var(--green-soft);
-  }
-  .np-prompt-bar input {
-    flex: 1 1 auto;
-    background: transparent;
-    border: none;
-    outline: none;
-    color: var(--text);
-    font-size: 16px;
-    font-weight: 500;
-    font-family: 'Inter', inherit;
-    line-height: 150%;
-    height: 100%;
-  }
-  .np-prompt-bar input::placeholder {
-    color: var(--text-mute);
-  }
-
-  /* Зелёная кнопка отправки 44×44 */
-  .np-send-btn {
-    flex: 0 0 44px;
-    width: 44px;
-    height: 44px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
-    box-shadow: 0 4px 4px rgba(0, 0, 0, 0.05);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-  }
-  .np-send-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 12px var(--green-shadow);
-  }
-  .np-send-btn:active {
-    transform: translateY(0);
-  }
-  .np-send-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-  .np-send-btn svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  /* Тонкая линия под баром */
-  .np-divider {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 32px;
-    width: 314px;
-    height: 1px;
-    background: var(--glass-border);
-  }
-
-  /* Статус под промптом */
-  .np-status {
-    position: absolute;
-    bottom: 40px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 12px;
-    color: var(--text-dim);
-    text-align: center;
-    z-index: 3;
-    width: 719px;
-    max-width: calc(100% - 80px);
-  }
-  .np-status.ok { color: var(--success); }
-  .np-status.err { color: var(--error); }
-
-  /* AI-режим: переключатель + статус над промпт-баром */
-  .np-ai-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-    padding: 0 4px;
-  }
-  .ai-toggle {
-    border: 1px solid var(--glass-border);
-    background: var(--glass);
-    color: var(--text-dim);
-    border-radius: var(--radius-md);
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-  }
-  .ai-toggle:hover {
-    background: var(--glass-strong);
-    color: var(--text);
-  }
-  .ai-toggle.on {
-    background: rgba(138, 43, 226, 0.2);
-    border-color: rgba(138, 43, 226, 0.5);
-    color: #c084fc;
-  }
-  .ai-status {
-    font-size: 11px;
-    color: var(--text-mute);
-    flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ai-status.ok { color: var(--success); }
-  .ai-status.err { color: var(--error); }
-
-  /* Кнопка-переключатель цепочки */
-  .pipeline-toggle {
-    border: 1px solid var(--glass-border);
-    background: var(--glass);
-    color: var(--text-dim);
-    border-radius: var(--radius-md);
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: inherit;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
-    flex: 0 0 auto;
-  }
-  .pipeline-toggle:hover { background: var(--glass-strong); color: var(--text); }
-  .pipeline-toggle.active {
-    background: rgba(138, 43, 226, 0.2);
-    border-color: rgba(138, 43, 226, 0.5);
-    color: #c084fc;
-  }
-
-  /* Правая панель конструктора цепочки */
-  .pipeline-panel {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    width: 280px;
-    max-height: calc(100vh - 120px);
-    background: rgba(8, 8, 8, 0.6);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .pipeline-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--glass-border);
-  }
-  .pipeline-panel-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #c084fc;
-  }
-  .pipeline-panel-close {
-    width: 24px; height: 24px;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 18px;
-    cursor: pointer;
-    border-radius: 4px;
-  }
-  .pipeline-panel-close:hover { background: var(--glass); color: var(--text); }
-  .pipeline-panel-body {
-    padding: 10px;
-    overflow-y: auto;
-    flex: 1 1 auto;
-  }
-  .pipeline-add-row {
-    display: flex;
-    gap: 6px;
-    margin-top: 10px;
-  }
-  .pipeline-add-btn {
-    flex: 1;
-    font-size: 11px;
-    padding: 6px 8px;
-  }
-  /* (pipeline CSS убран — цепочка больше не нужна) */
-
-
-  /* Кнопка-переключатель Blockly */
-  .blockly-toggle {
-    border: 1px solid var(--glass-border);
-    background: var(--glass);
-    color: var(--text-dim);
-    border-radius: var(--radius-md);
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: inherit;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
-    flex: 0 0 auto;
-  }
-  .blockly-toggle:hover { background: var(--glass-strong); color: var(--text); }
-  .blockly-toggle.active {
-    background: rgba(112, 52, 232, 0.2);
-    border-color: rgba(112, 52, 232, 0.5);
-    color: #c084fc;
-  }
-
-  .blocklySvg {
-    background-color: var(--grad-from) !important;
-  }
-  .blocklyMainBackground {
-    fill: var(--grad-from) !important;
-    fill-opacity: 1 !important;
-  }
-  .blocklyGrid line {
-    stroke: #333 !important;
-  }
-  .blocklyToolboxDiv {
-    background: #121212 !important;
-    border-top: 1px solid var(--border);
-  }
-  .blocklyToolboxCategory {
-    color: var(--text-dim) !important;
-  }
-  .blocklyToolboxCategory:hover {
-    background: rgba(128, 110, 255, 0.15) !important;
-    color: var(--text) !important;
-  }
-  .blocklyToolboxCategorySelected {
-    background: rgba(128, 110, 255, 0.2) !important;
-    color: var(--text) !important;
-  }
-  .blocklyToolboxCategoryLabel {
-    color: var(--text-dim) !important;
-    font-weight: 500;
-  }
-  .blocklyToolboxCategorySelected .blocklyToolboxCategoryLabel {
-    color: var(--text) !important;
-  }
-  .blocklyFlyoutBackground {
-    fill: #1a1a1a !important;
-    fill-opacity: 0.98 !important;
-  }
-  .blockly-panel-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    background: var(--grad-to);
-    border-bottom: 1px solid var(--border);
-    flex: 0 0 auto;
-  }
-  .blockly-panel-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #c084fc;
-    flex: 0 0 auto;
-  }
-  .blockly-panel-run {
-    flex: 1 1 auto;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    border-radius: 4px;
-    padding: 5px 12px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .blockly-panel-run:hover { background: var(--accent-hover); }
-  .blockly-panel-close {
-    width: 28px; height: 28px;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 20px;
-    cursor: pointer;
-    border-radius: 4px;
-    flex: 0 0 auto;
-  }
-  .blockly-panel-close:hover { background: var(--glass); color: var(--text); }
-  .blockly-container {
-    flex: 1 1 auto;
-    overflow: hidden;
-    min-height: 200px;
-  }
-
-  /* AI-ответ — фиолетовый пузырь (слева, как terminal) */
-  .ph-item.role-ai {
-    margin-right: auto;
-    background: rgba(138, 43, 226, 0.08);
-    border-color: rgba(138, 43, 226, 0.3);
-    border-left: 3px solid #8a2be2;
-    border-top-left-radius: 2px;
-    border-bottom-left-radius: 2px;
-  }
-  .ph-item.role-ai .ph-role { color: #c084fc; }
-
-  /* Индикатор "AI думает..." — три прыгающих точки */
-  .processing-indicator {
-    margin-right: auto;
-    background: rgba(138, 43, 226, 0.08);
-    border-color: rgba(138, 43, 226, 0.3);
-    border-left: 3px solid #8a2be2;
-  }
-  .processing-indicator .ph-pill {
-    background: rgba(138, 43, 226, 0.3);
-    color: #c084fc;
-    animation: pulse-pill 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse-pill {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-  .typing-dots {
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
-  }
-  .typing-dots span {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #c084fc;
-    animation: typing-bounce 1.4s ease-in-out infinite;
-  }
-  .typing-dots span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-  .typing-dots span:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-  @keyframes typing-bounce {
-    0%, 60%, 100% {
-      transform: translateY(0);
-      opacity: 0.4;
-    }
-    30% {
-      transform: translateY(-8px);
-      opacity: 1;
-    }
-  }
-  .typing-text {
-    font-size: 13px;
-    color: var(--text-dim);
-    margin-left: 4px;
-  }
-  /* ===== Projects list in sidebar ===== */
-  .projects-section {
-    padding: 4px 10px 8px;
-  }
-  .projects-header {
-    font-size: 10px;
-    color: var(--text-mute);
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    padding: 12px 8px 6px;
-    font-weight: 600;
-  }
-  .projects-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 280px;
-    overflow-y: auto;
-  }
-  .projects-list::-webkit-scrollbar { width: 4px; }
-  .projects-list::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 2px; }
-
-  .project-item {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 2px;
-    border-radius: var(--radius-md);
-    transition: background 0.12s ease;
-  }
-  .project-item:hover { background: var(--glass); }
-  .project-item.active { background: var(--green-soft); }
-  .project-item.active .project-name { color: #fff; }
-  .project-item.active .project-delete { color: rgba(255,255,255,0.6); }
-  .project-item.active .project-delete:hover { background: rgba(255,255,255,0.15); color: #fff; }
-
-  .project-name {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    padding: 9px 10px;
-    font-size: 13px;
-    font-family: inherit;
-    text-align: left;
-    cursor: pointer;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .project-name .proj-ico {
-    flex: 0 0 auto;
-    font-size: 13px;
-    opacity: 0.7;
-  }
-  .project-name .proj-name-text {
-    flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .project-rename-input {
-    flex: 1 1 auto;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid var(--green);
-    border-radius: 4px;
-    color: var(--text);
-    padding: 2px 6px;
-    font-size: 13px;
-    font-family: inherit;
-    outline: none;
-    min-width: 0;
-  }
-  .project-delete {
-    flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
-    border: none;
-    background: transparent;
-    color: var(--text-mute);
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 18px;
-    line-height: 1;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    margin-right: 6px;
-    transition: background 0.12s ease, color 0.12s ease;
-  }
-  .project-item:hover .project-delete { display: flex; }
-  .project-delete:hover {
-    background: rgba(244, 67, 54, 0.25);
-    color: var(--error);
-  }
-  .projects-empty {
-    padding: 14px 12px;
-    font-size: 12px;
-    color: var(--text-mute);
-    font-style: italic;
-  }
-  .nav-divider {
-    height: 1px;
-    background: var(--glass-border);
-    margin: 8px 10px;
-  }
-
-  /* ===== Project view (dynamic, replaces static np-header) ===== */
   .project-header {
     position: absolute;
     top: 28px;
@@ -1052,10 +290,7 @@
   }
   .project-title-input::placeholder { color: var(--text-mute); }
   .project-title-input:hover { background: var(--glass); }
-  .project-title-input:focus {
-    background: var(--glass);
-    border-color: var(--green-soft);
-  }
+  .project-title-input:focus { background: var(--glass); border-color: var(--green-soft); }
   .project-subtitle {
     color: var(--text-dim);
     font-size: 13px;
@@ -1082,7 +317,6 @@
     font-size: 13px;
     padding: 60px 0;
   }
-  /* Чат-пузыри: команда (user) справа, ответ терминала (assistant) слева */
   .ph-item {
     display: flex;
     flex-direction: column;
@@ -1097,8 +331,6 @@
     font-size: 13px;
     max-width: 75%;
   }
-
-  /* Команда пользователя — справа */
   .ph-item.role-user {
     margin-left: auto;
     background: rgba(0, 122, 204, 0.1);
@@ -1107,7 +339,6 @@
     border-top-right-radius: 2px;
     border-bottom-right-radius: 2px;
   }
-  /* Ответ терминала — слева */
   .ph-item.role-assistant {
     margin-right: auto;
     background: rgba(1, 154, 90, 0.08);
@@ -1116,8 +347,14 @@
     border-top-left-radius: 2px;
     border-bottom-left-radius: 2px;
   }
-
-  /* Шапка пузыря: role + time + pill */
+  .ph-item.role-ai {
+    margin-right: auto;
+    background: rgba(138, 43, 226, 0.08);
+    border-color: rgba(138, 43, 226, 0.3);
+    border-left: 3px solid #8a2be2;
+    border-top-left-radius: 2px;
+    border-bottom-left-radius: 2px;
+  }
   .ph-item .ph-header {
     display: flex;
     align-items: center;
@@ -1131,6 +368,7 @@
   }
   .ph-item.role-user .ph-role { color: var(--accent); }
   .ph-item.role-assistant .ph-role { color: var(--green); }
+  .ph-item.role-ai .ph-role { color: #c084fc; }
   .ph-item .ph-time {
     color: var(--text-mute);
     font-family: "SF Mono", Menlo, Consolas, monospace;
@@ -1145,22 +383,13 @@
     font-weight: 500;
   }
   .ph-item .ph-pill.err { background: var(--error); }
-
-  /* Тело пузыря — текст команды или вывод */
   .ph-item .ph-body {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     word-break: break-all;
-    /* Сохраняем переносы строк — важно для вывода терминала */
     white-space: pre-wrap;
     line-height: 1.5;
   }
-  .ph-item .ph-error {
-    color: var(--error);
-    font-size: 11px;
-    margin-top: 4px;
-  }
-
-  /* Кнопка копирования в шапке пузыря */
+  .ph-item .ph-error { color: var(--error); font-size: 11px; margin-top: 4px; }
   .ph-copy {
     margin-left: auto;
     border: none;
@@ -1178,7 +407,34 @@
   .ph-copy:hover { color: var(--text); background: var(--glass-strong); }
   .ph-copy.copied { color: var(--success); opacity: 1; }
 
-  /* Empty state for project view (no project selected) */
+  .processing-indicator {
+    margin-right: auto;
+    background: rgba(138, 43, 226, 0.08);
+    border-color: rgba(138, 43, 226, 0.3);
+    border-left: 3px solid #8a2be2;
+  }
+  .processing-indicator .ph-pill {
+    background: rgba(138, 43, 226, 0.3);
+    color: #c084fc;
+    animation: pulse-pill 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-pill { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .typing-dots { display: inline-flex; gap: 4px; align-items: center; }
+  .typing-dots span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c084fc;
+    animation: typing-bounce 1.4s ease-in-out infinite;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typing-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-8px); opacity: 1; }
+  }
+  .typing-text { font-size: 13px; color: var(--text-dim); margin-left: 4px; }
+
   .project-empty-state {
     display: flex;
     flex-direction: column;
@@ -1188,147 +444,346 @@
     text-align: center;
     padding: 40px;
   }
-  .project-empty-state h2 {
-    font-size: 22px;
-    font-weight: 600;
-    margin: 16px 0 8px;
-  }
-  .project-empty-state p {
-    color: var(--text-dim);
-    font-size: 14px;
-    margin: 0 0 24px;
-  }
+  .project-empty-state h2 { font-size: 22px; font-weight: 600; margin: 16px 0 8px; }
+  .project-empty-state p { color: var(--text-dim); font-size: 14px; margin: 0 0 24px; }
   .project-empty-state .btn { margin-top: 8px; }
 
-  /* ===== Pipeline (Цепочка) ===== */
-  .pipeline-nodes {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-height: 60px;
+  .np-prompt-wrap {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 719px;
+    max-width: calc(100% - 80px);
+    z-index: 2;
   }
-  .pipeline-empty, .pipeline-results-empty {
-    text-align: center;
-    color: var(--text-mute);
-    font-size: 13px;
-    padding: 20px;
-    font-style: italic;
-  }
-  .pipeline-node {
+  .np-ai-bar {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md);
-    transition: border-color 0.15s ease;
+    margin-bottom: 8px;
+    padding: 0 4px;
   }
-  .pipeline-node:hover { border-color: var(--green-soft); }
-  .pipeline-node-num {
-    flex: 0 0 auto;
-    width: 24px; height: 24px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #fff;
-    font-size: 12px; font-weight: 600;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .pipeline-node-icon { flex: 0 0 auto; font-size: 18px; }
-  .pipeline-node-info { flex: 1 1 auto; min-width: 0; }
-  .pipeline-node-name {
-    font-size: 13px; font-weight: 500;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .pipeline-node-url {
-    font-size: 10px; color: var(--text-mute);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-  }
-  .pipeline-node-actions { flex: 0 0 auto; display: flex; gap: 4px; }
-  .pipeline-node-actions button {
-    width: 26px; height: 26px;
+  .ai-toggle, .blockly-toggle {
     border: 1px solid var(--glass-border);
     background: var(--glass);
     color: var(--text-dim);
-    border-radius: 4px; cursor: pointer;
-    font-size: 14px; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.12s ease;
-  }
-  .pipeline-node-actions button:hover { background: var(--glass-strong); color: var(--text); }
-  .pipeline-node-actions button.danger:hover { background: rgba(244,67,54,0.2); color: var(--error); }
-  .pipeline-arrow {
-    text-align: center;
-    color: var(--text-mute);
-    font-size: 16px;
-    margin: -4px 0;
-  }
-
-  /* Pipeline results — те же чат-пузыри, но с именем узла */
-  .pipeline-results {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-height: 80px;
-  }
-  .pl-step {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 10px 14px;
     border-radius: var(--radius-md);
-    max-width: 85%;
-    font-size: 13px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    flex: 0 0 auto;
   }
-  .pl-step.role-user {
-    margin-left: auto;
-    background: rgba(0,122,204,0.1);
-    border: 1px solid rgba(0,122,204,0.3);
-    border-right: 3px solid var(--accent);
+  .ai-toggle:hover, .blockly-toggle:hover { background: var(--glass-strong); color: var(--text); }
+  .ai-toggle.on {
+    background: rgba(138, 43, 226, 0.2);
+    border-color: rgba(138, 43, 226, 0.5);
+    color: #c084fc;
   }
-  .pl-step.role-ai {
-    margin-right: auto;
-    background: rgba(138,43,226,0.08);
-    border: 1px solid rgba(138,43,226,0.3);
-    border-left: 3px solid #8a2be2;
+  .blockly-toggle.active {
+    background: rgba(112, 52, 232, 0.2);
+    border-color: rgba(112, 52, 232, 0.5);
+    color: #c084fc;
   }
-  .pl-step.role-assistant {
-    margin-right: auto;
-    background: rgba(1,154,90,0.08);
-    border: 1px solid rgba(1,154,90,0.3);
-    border-left: 3px solid var(--green);
+  .ai-status {
+    font-size: 11px;
+    color: var(--text-mute);
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .pl-step-header {
+  .ai-status.ok { color: var(--success); }
+  .ai-status.err { color: var(--error); }
+
+  .np-prompt-bar {
+    box-sizing: border-box;
+    height: 56px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 10px;
+    padding: 6px 6px 6px 20px;
+    gap: 12px;
+    transition: border-color 0.15s ease;
   }
-  .pl-step-role {
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-  }
-  .pl-step.role-user .pl-step-role { color: var(--accent); }
-  .pl-step.role-ai .pl-step-role { color: #c084fc; }
-  .pl-step.role-assistant .pl-step-role { color: var(--green); }
-  .pl-step-time { color: var(--text-mute); font-family: monospace; }
-  .pl-step-pill {
-    margin-left: auto;
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--success);
-    color: #fff;
+  .np-prompt-bar:focus-within { border-color: var(--green-soft); }
+  .np-prompt-bar input {
+    flex: 1 1 auto;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 16px;
     font-weight: 500;
+    font-family: 'Inter', inherit;
+    line-height: 150%;
+    height: 100%;
   }
-  .pl-step-pill.err { background: var(--error); }
-  .pl-step-body {
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    white-space: pre-wrap;
-    word-break: break-all;
-    line-height: 1.5;
+  .np-prompt-bar input::placeholder { color: var(--text-mute); }
+
+  .np-send-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
+    box-shadow: 0 4px 4px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .np-send-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 12px var(--green-shadow); }
+  .np-send-btn:active { transform: translateY(0); }
+  .np-send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .np-send-btn svg { width: 20px; height: 20px; }
+
+  .np-divider {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 32px;
+    width: 314px;
+    height: 1px;
+    background: var(--glass-border);
+  }
+  .np-status {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    z-index: 3;
+    width: 719px;
+    max-width: calc(100% - 80px);
+  }
+  .np-status.ok { color: var(--success); }
+  .np-status.err { color: var(--error); }
+
+  /* ===== Buttons ===== */
+  .btn {
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 12px 22px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+  .btn-primary {
+    background: linear-gradient(91.96deg, var(--green-soft) -16.64%, var(--green-soft-2) 117.28%);
+    color: #fff;
+    box-shadow: 0 4px 12px var(--green-shadow);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px var(--green-shadow); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-ghost {
+    background: var(--glass);
+    color: var(--text-dim);
+    border: 1px solid var(--glass-border);
+  }
+  .btn-ghost:hover { background: var(--glass-strong); color: var(--text); }
+
+  /* ===== Projects list ===== */
+  .projects-section { padding: 4px 10px 8px; }
+  .projects-header {
+    font-size: 10px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 12px 8px 6px;
+    font-weight: 600;
+  }
+  .projects-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .projects-list::-webkit-scrollbar { width: 4px; }
+  .projects-list::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 2px; }
+  .project-item {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 2px;
+    border-radius: var(--radius-md);
+    transition: background 0.12s ease;
+  }
+  .project-item:hover { background: var(--glass); }
+  .project-item.active { background: var(--green-soft); }
+  .project-item.active .project-name { color: #fff; }
+  .project-item.active .project-delete { color: rgba(255,255,255,0.6); }
+  .project-item.active .project-delete:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  .project-name {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 9px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .project-name .proj-ico { flex: 0 0 auto; font-size: 13px; opacity: 0.7; }
+  .project-name .proj-name-text {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .project-delete {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-mute);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 18px;
+    line-height: 1;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .project-item:hover .project-delete { display: flex; }
+  .project-delete:hover { background: rgba(244, 67, 54, 0.25); color: var(--error); }
+  .projects-empty {
+    padding: 14px 12px;
+    font-size: 12px;
+    color: var(--text-mute);
+    font-style: italic;
+  }
+
+  /* ===== Blockly panel ===== */
+  .blocklySvg { background-color: var(--grad-from) !important; }
+  .blocklyMainBackground { fill: var(--grad-from) !important; fill-opacity: 1 !important; }
+  .blocklyGrid line { stroke: #333 !important; }
+  .blocklyToolboxDiv { background: #121212 !important; border-top: 1px solid var(--border); }
+  .blocklyToolboxCategory { color: var(--text-dim) !important; }
+  .blocklyToolboxCategory:hover { background: rgba(128, 110, 255, 0.15) !important; color: var(--text) !important; }
+  .blocklyToolboxCategorySelected { background: rgba(128, 110, 255, 0.2) !important; color: var(--text) !important; }
+  .blocklyToolboxCategoryLabel { color: var(--text-dim) !important; font-weight: 500; }
+  .blocklyToolboxCategorySelected .blocklyToolboxCategoryLabel { color: var(--text) !important; }
+  .blocklyFlyoutBackground { fill: #1a1a1a !important; fill-opacity: 0.98 !important; }
+  .blockly-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--grad-to);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .blockly-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #c084fc;
+    flex: 0 0 auto;
+  }
+  .blockly-panel-run {
+    flex: 1 1 auto;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .blockly-panel-run:hover { background: var(--accent-hover); }
+  .blockly-panel-run:disabled { opacity: 0.5; cursor: not-allowed; }
+  .blockly-panel-stop {
+    flex: 0 0 auto;
+    border: none;
+    background: var(--error);
+    color: #fff;
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .blockly-panel-stop:hover { background: #d32f2f; }
+  body.blockly-running .blockly-panel-run { display: none; }
+  body.blockly-running .blockly-panel-stop { display: flex; }
+  body.blockly-running .np-send-btn { opacity: 0.5; pointer-events: none; }
+
+  /* ============================================================
+     Skeleton-анимация для выполняемого блока (React/Material style)
+     — серый placeholder закрывает блок + бегущая полоса света (wave)
+     ============================================================ */
+  /* Тонкая золотая обводка — показывает КАКОЙ блок сейчас active
+     (не пульсирует, просто визуальная метка) */
+  .nezar-executing > .blocklyPath {
+    stroke: #FFD700 !important;
+    stroke-width: 2 !important;
+  }
+  /* Base overlay — серый placeholder, закрывает содержимое блока */
+  .nezar-skeleton-base {
+    pointer-events: none;
+  }
+  /* Shimmer overlay — бегущая полоса света поверх base */
+  .nezar-skeleton-shimmer {
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+  .btn-ghost.blockly-copy-btn,
+  .btn-ghost.blockly-paste-btn,
+  .btn-ghost.blockly-export-btn,
+  .btn-ghost.blockly-import-btn {
+    padding: 4px 8px;
+    font-size: 14px;
+  }
+  .blockly-panel-close {
+    width: 28px; height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 20px;
+    cursor: pointer;
+    border-radius: 4px;
+    flex: 0 0 auto;
+  }
+  .blockly-panel-close:hover { background: var(--glass); color: var(--text); }
+  .blockly-container {
+    flex: 1 1 auto;
+    overflow: hidden;
+    min-height: 200px;
   }
 </style>
 </head>
@@ -1338,7 +793,6 @@
  <div class="sidebar-inner">
   <div class="brand">
     <div class="logo">
-      <!-- Иконка пользователя -->
       <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <g clip-path="url(#clip_dash)">
           <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -11 14)" fill="white"/>
@@ -1355,8 +809,8 @@
       </svg>
     </div>
     <div class="titles">
-      <div class="title">Firebase Bridge</div>
-      <div class="subtitle">→ VSCode Terminal</div>
+      <div class="title">NEZAR</div>
+      <div class="subtitle">визуальный AI-агент</div>
     </div>
     <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Свернуть панель" aria-label="Свернуть панель">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1366,21 +820,12 @@
   </div>
 
   <nav class="nav">
-    <button class="nav-item" data-view="workspace">
-      <span class="ico">💼</span>
-      <span class="label">Workspace</span>
-    </button>
-    <button class="nav-item" data-view="settings">
-      <span class="ico">⚙</span>
-      <span class="label">Настройки</span>
-    </button>
-
-    <div class="nav-divider"></div>
-
     <button class="nav-item" id="new-project-btn">
       <span class="ico">✦</span>
       <span class="label">Новый проект</span>
     </button>
+
+    <div class="nav-divider"></div>
 
     <div class="projects-section">
       <div class="projects-header">Проекты</div>
@@ -1391,27 +836,26 @@
   </nav>
 
   <div class="sidebar-footer">
-    <div class="conn-label">Соединение:</div>
-    <div class="conn-value err" id="conn-status">не подключён</div>
+    <div class="conn-label">Native host:</div>
+    <div class="conn-value err" id="conn-status">проверка…</div>
+    <button class="reconnect-btn" id="reconnect-btn">Перепроверить</button>
   </div>
  </div>
 </aside>
 
 <main class="content">
 
- <!-- Плавающая кнопка разворота сайдбара (видна только когда свёрнут) -->
  <button class="sidebar-expand-btn" id="sidebar-expand-btn" title="Показать панель" aria-label="Показать панель">
    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
      <path d="M9 6 L15 12 L9 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
    </svg>
  </button>
 
-  <!-- ===== View: Проект (prompt-style, dynamic) ===== -->
-  <section id="view-new-project" class="view">
+  <!-- ===== View: Проект (chat + blockly) ===== -->
+  <section id="view-new-project" class="view active">
 
     <!-- ЛЕВАЯ СТОРОНА: ЧАТ -->
     <div class="np-chat-side" id="np-chat-side">
-    <!-- Иконка-водяной знак (повёрнута -90deg, opacity 0.08) -->
     <div class="np-watermark" aria-hidden="true">
       <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
         <g clip-path="url(#clip_np)">
@@ -1429,7 +873,7 @@
       </svg>
     </div>
 
-    <!-- Empty state: показывается когда нет активного проекта -->
+    <!-- Empty state: нет активного проекта -->
     <div class="project-empty-state" id="project-empty-state">
       <div style="font-size:48px;opacity:0.3;">✦</div>
       <h2>Нет активного проекта</h2>
@@ -1437,10 +881,10 @@
       <button type="button" class="btn btn-primary" id="empty-state-create-btn">Создать проект</button>
     </div>
 
-    <!-- Активный проект: заголовок + история (скрыты пока нет проекта) -->
+    <!-- Активный проект: заголовок + история -->
     <div class="project-header" id="project-header" style="display:none;">
       <input type="text" class="project-title-input" id="project-title-input" value="Новый проект" placeholder="Название проекта" spellcheck="false" />
-      <div class="project-subtitle">Опишите команду — она уйдёт в Firebase и выполнится в терминале VSCode</div>
+      <div class="project-subtitle">Опишите задачу — выполнится через терминал или AI</div>
     </div>
 
     <div class="project-history" id="project-history" style="display:none;">
@@ -1448,16 +892,14 @@
     </div>
 
     <div class="np-prompt-wrap">
-      <!-- AI-режим: переключатель + статус вкладки DeepSeek -->
       <div class="np-ai-bar">
         <button type="button" class="ai-toggle" id="ai-toggle">AI режим: ВЫКЛ</button>
         <span class="ai-status" id="ai-status">✗ не проверено</span>
-        <button type="button" class="blockly-toggle" id="blockly-toggle" title="Показать блоки">🧩 Блоки</button>
+        <button type="button" class="blockly-toggle active" id="blockly-toggle" title="Скрыть/показать блоки">🧩 Блоки</button>
       </div>
       <div class="np-prompt-bar">
-        <input type="text" id="np-prompt" placeholder="Например: echo Привет из браузера" autocomplete="off" spellcheck="false" />
+        <input type="text" id="np-prompt" placeholder="Например: ls -la /tmp" autocomplete="off" spellcheck="false" />
         <button type="button" class="np-send-btn" id="np-send-btn" title="Отправить (Enter)">
-          <!-- Иконка отправки: стрелка вверх -->
           <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M10 16 V4 M4 10 L10 4 L16 10" stroke="#E5E5E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           </svg>
@@ -1470,15 +912,26 @@
 
     </div><!-- /np-chat-side -->
 
-    <!-- Ресайзер: тянуть за край чтобы изменить размер -->
+    <!-- Ресайзер -->
     <div class="np-resizer" id="np-resizer"></div>
 
-    <!-- ПРАВАЯ СТОРОНА: BLOCKLY -->
-    <div class="np-blockly-side" id="blockly-panel" style="display:none;">
+    <!-- ПРАВАЯ СТОРОНА: BLOCKLY (видна по умолчанию!) -->
+    <div class="np-blockly-side" id="blockly-panel">
       <div class="blockly-panel-header">
         <span class="blockly-panel-title">🧩 Блоки</span>
+        <button type="button" class="blockly-panel-run" id="blockly-run-btn" title="Запустить блоки (текст из поля ввода будет в блоке ПРОМПТ)">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M4 2 L13 8 L4 14 Z"/></svg>
+          Run
+        </button>
+        <button type="button" class="blockly-panel-stop" id="blockly-stop-btn" title="Остановить выполнение">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/></svg>
+          Stop
+        </button>
         <button type="button" class="btn btn-ghost blockly-copy-btn" id="blockly-copy-btn" title="Копировать все блоки">⧉</button>
         <button type="button" class="btn btn-ghost blockly-paste-btn" id="blockly-paste-btn" title="Вставить блоки">📋</button>
+        <button type="button" class="btn btn-ghost blockly-export-btn" id="blockly-export-btn" title="Сохранить блоки в файл">💾</button>
+        <button type="button" class="btn btn-ghost blockly-import-btn" id="blockly-import-btn" title="Загрузить блоки из файла">📂</button>
+        <input type="file" id="blockly-import-input" accept=".nezar.json,.json,.xml" style="display:none;">
         <button type="button" class="blockly-panel-close" id="blockly-panel-close">×</button>
       </div>
       <div id="blockly-container" class="blockly-container">
@@ -1493,7 +946,7 @@
         <category name="Действия" colour="#5757FF">
           <block type="nezar_send_deepseek"></block>
           <block type="nezar_send_qwen"></block>
-          <block type="nezar_send_vscode"></block>
+          <block type="nezar_send_alice"></block>
           <block type="nezar_send_native"></block>
           <block type="nezar_print"></block>
         </category>
@@ -1518,84 +971,25 @@
             </value>
           </block>
           <block type="controls_whileUntil"></block>
+          <block type="nezar_wait">
+            <value name="TIME">
+              <shadow type="nezar_text">
+                <field name="TEXT">1</field>
+              </shadow>
+            </value>
+          </block>
         </category>
       </xml>
     </div><!-- /np-blockly-side -->
 
   </section>
 
-  <!-- ===== View: Workspace ===== -->
-  <section id="view-workspace" class="view">
-    <div class="padded-view">
-      <h1>Workspace</h1>
-      <p class="lead">Введите команду и отправьте — она попадёт в Firebase Realtime DB, а VSCode выполнит её в терминале «Firebase Bridge».</p>
-
-      <div class="glass-card">
-        <textarea class="workspace-textarea" id="cmd" placeholder="например: echo Привет из браузера" spellcheck="false"></textarea>
-        <div class="btn-row">
-          <button type="button" class="btn btn-primary" id="send-btn">Отправить</button>
-          <button type="button" class="btn btn-ghost" id="clear-btn">Очистить</button>
-        </div>
-        <div class="kbd-hint">
-          <span class="kbd">Enter</span> отправить · <span class="kbd">Shift+Enter</span> перенос · <span class="kbd">Ctrl/Cmd+Enter</span> тоже отправить
-        </div>
-        <div class="status-line" id="send-status"></div>
-      </div>
-
-      <h2>История команд</h2>
-      <ul class="history" id="history">
-        <li class="history-empty">Пока ничего не отправлено.</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- ===== View: Настройки ===== -->
-  <section id="view-settings" class="view">
-    <div class="padded-view">
-      <h1>Настройки Firebase</h1>
-      <p class="lead">Введите данные подключения к Realtime Database и нажмите «Подключить». Соединение будет проверено реальным запросом.</p>
-
-      <div class="glass-card">
-        <form id="settings-form" autocomplete="off">
-          <div class="field">
-            <label for="db-url">Database URL</label>
-            <input type="text" id="db-url" placeholder="https://YOUR-PROJECT-default-rtdb.firebaseio.com" spellcheck="false" />
-            <div class="hint">Firebase Console → Build → Realtime Database → Data, URL сверху.</div>
-          </div>
-
-          <div class="field">
-            <label for="api-key">API Key (необязательно)</label>
-            <input type="password" id="api-key" placeholder="AIza..." spellcheck="false" />
-            <div class="hint">Нужен только если включите аутентификацию. Для тестового режима не требуется.</div>
-          </div>
-
-          <div class="field">
-            <label for="db-path">Путь в базе</label>
-            <input type="text" id="db-path" value="commands/queue" spellcheck="false" />
-            <div class="hint">Должен совпадать с настройкой <code>firebaseTerminal.databasePath</code> в VSCode-расширении.</div>
-          </div>
-
-          <div class="field">
-            <label for="source-name">Имя источника</label>
-            <input type="text" id="source-name" value="browser-extension" spellcheck="false" />
-            <div class="hint">Метка в заголовке команды в терминале VSCode.</div>
-          </div>
-
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary" id="connect-btn">Подключить</button>
-            <button type="button" class="btn btn-ghost" id="reset-btn">Сбросить</button>
-          </div>
-
-          <div class="status-line" id="settings-status"></div>
-        </form>
-      </div>
-    </div>
-  </section>
-
 </main>
 
 <script src="blockly.min.js"></script>
 <script src="blockly_msg_ru.js"></script>
+<script src="blocks_compressed.js"></script>
+<script src="javascript_compressed.js"></script>
 <script src="blockly.js"></script>
 <script src="dashboard.js"></script>
 </body>

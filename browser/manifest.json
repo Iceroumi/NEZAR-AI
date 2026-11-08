@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Firebase → VSCode Terminal Bridge",
-  "version": "0.7.2",
-  "description": "Dashboard: отправка команд в терминал VSCode через Firebase. Опционально — через AI (DeepSeek/Qwen/GLM).",
+  "name": "NEZAR — визуальный AI-агент",
+  "version": "1.0.0",
+  "description": "Бесплатный визуальный AI-агент: Blockly-блоки + web-чаты DeepSeek/Qwen/GLM + Native Messaging терминал. Без API-ключей и облака.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Открыть Firebase Bridge",
+    "default_title": "Открыть NEZAR",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -24,7 +24,9 @@
       "matches": [
         "https://chat.deepseek.com/*",
         "https://chat.qwen.ai/*",
-        "https://chat.z.ai/*"
+        "https://chat.z.ai/*",
+        "https://alice.yandex.ru/*",
+        "https://yandex.ru/alice/*"
       ],
       "js": ["content/main.js"],
       "run_at": "document_idle"
@@ -32,11 +34,11 @@
   ],
   "permissions": ["storage", "tabs", "nativeMessaging"],
   "host_permissions": [
-    "https://*.firebaseio.com/*",
-    "https://*.firebasedatabase.app/*",
     "https://chat.deepseek.com/*",
     "https://chat.qwen.ai/*",
-    "https://chat.z.ai/*"
+    "https://chat.z.ai/*",
+    "https://alice.yandex.ru/*",
+    "https://yandex.ru/alice/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
