@@ -249,6 +249,184 @@ function syncAliases() {
 syncAliases();
 
 // ============================================================
+// Context menu: Copy / Paste block JSON через системный буфер обмена
+// ============================================================
+// Добавляет пункты в правый клик-меню Blockly:
+//   - На блоке:        «📋 Копировать JSON блока»   → BLOCK scope
+//   - На workspace:    «📥 Вставить блок из буфера»  → WORKSPACE scope
+//
+// Использует navigator.clipboard.writeText / readText (OS clipboard),
+// с in-memory fallback на editorState.clipboard.blockly если clipboard API
+// недоступен (например в небезопасном контексте http://).
+//
+// В буфер кладётся JSON одного блока (результат Blockly.serialization.blocks.save).
+// При вставке поддерживаются:
+//   - одиночный блок  { type: "nezar_send_deepseek", ... }
+//   - полный state    { blocks: { blocks: [...] }, variables: [...] }
+//     (берём первый top-level блок из state.blocks.blocks)
+
+let nezarContextMenuRegistered = false;
+
+function registerNezarContextMenu() {
+  if (nezarContextMenuRegistered) return;
+  if (typeof Blockly === 'undefined') return;
+  if (!Blockly.ContextMenuRegistry || !Blockly.ContextMenuRegistry.registry) return;
+  const registry = Blockly.ContextMenuRegistry.registry;
+  const ScopeType = Blockly.ContextMenuRegistry.ScopeType;
+
+  // --- 1. COPY: копирует JSON одного блока в OS clipboard ---
+  if (!registry.getItem('nezar_copy_block_json')) {
+    const copyItem = {
+      displayText: '📋 Копировать JSON блока',
+      preconditionFn: function (scope) {
+        const block = scope && scope.block;
+        if (!block) return 'hidden';
+        return block.isDeletable() ? 'enabled' : 'hidden';
+      },
+      callback: function (scope) {
+        const block = scope && scope.block;
+        if (!block) return;
+        try {
+          const json = Blockly.serialization.blocks.save(block);
+          if (!json) {
+            console.warn('[nezar-blockly] copy: serialization returned empty');
+            return;
+          }
+          const text = JSON.stringify(json, null, 2);
+          // In-memory store (для fallback при paste)
+          editorState.clipboard.blockly = json;
+          // OS clipboard
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+              console.log('[nezar-blockly] block JSON copied to OS clipboard:',
+                json.type || '(unknown type)');
+            }).catch(err => {
+              console.warn('[nezar-blockly] clipboard.writeText failed, in-memory only:', err);
+            });
+          } else {
+            console.warn('[nezar-blockly] clipboard API unavailable, in-memory only');
+          }
+        } catch (e) {
+          console.error('[nezar-blockly] copy block error:', e);
+        }
+      },
+      scopeType: ScopeType.BLOCK,
+      id: 'nezar_copy_block_json',
+      weight: 5,
+    };
+    registry.register(copyItem);
+  }
+
+  // --- 2. PASTE: вставляет блок из OS clipboard в позицию клика ---
+  if (!registry.getItem('nezar_paste_block_json')) {
+    const pasteItem = {
+      displayText: '📥 Вставить блок из буфера',
+      preconditionFn: function (scope) {
+        // Всегда enabled — если буфер пуст, покажем alert в callback
+        return 'enabled';
+      },
+      callback: async function (scope) {
+        const workspace = (scope && scope.workspace) ||
+                          (scope && scope.block && scope.block.workspace) ||
+                          blocklyWorkspace;
+        if (!workspace) {
+          console.warn('[nezar-blockly] paste: no workspace');
+          return;
+        }
+
+        // Определяем позицию вставки:
+        //   1) scope.coords (правый клик на workspace) — лучший вариант
+        //   2) центр видимой области workspace
+        let targetX = 0, targetY = 0;
+        if (scope && scope.coords) {
+          targetX = scope.coords.x;
+          targetY = scope.coords.y;
+        } else {
+          try {
+            const metrics = workspace.getMetrics();
+            targetX = metrics.viewLeft + metrics.viewWidth / 2;
+            targetY = metrics.viewTop + metrics.viewHeight / 2;
+          } catch (e) {}
+        }
+
+        // Читаем JSON: сначала OS clipboard, потом in-memory fallback
+        let json = null;
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text && text.trim()) {
+              json = JSON.parse(text);
+              console.log('[nezar-blockly] paste: read from OS clipboard, len=' + text.length);
+            }
+          } catch (e) {
+            console.warn('[nezar-blockly] clipboard.readText failed:', e.message);
+          }
+        }
+        if (!json && editorState.clipboard.blockly) {
+          json = editorState.clipboard.blockly;
+          console.log('[nezar-blockly] paste: using in-memory clipboard');
+        }
+
+        if (!json) {
+          alert('Буфер обмена пуст или содержит не-JSON данные.\n' +
+                'Сначала right-click на блоке → «📋 Копировать JSON блока».');
+          return;
+        }
+
+        // Нормализуем: поддерживаем и single-block и full-workspace-state
+        let blockJson = json;
+        if (json.blocks && json.blocks.blocks) {
+          // Full workspace state → берём первый top-level блок
+          blockJson = json.blocks.blocks[0];
+        }
+        if (!blockJson || !blockJson.type) {
+          alert('В буфере нет валидного Blockly-блока.\n' +
+                'Ожидался JSON вида {"type":"nezar_...", ...}');
+          return;
+        }
+
+        try {
+          // recordUndo: true — добавляет в историю Blockly для Ctrl+Z
+          const newBlock = Blockly.serialization.blocks.append(
+            blockJson,
+            workspace,
+            { recordUndo: true }
+          );
+
+          if (newBlock) {
+            // Двигаем в позицию клика
+            try {
+              newBlock.render();
+              const origin = newBlock.getRelativeToSurfaceXY();
+              newBlock.moveBy(targetX - origin.x, targetY - origin.y);
+              newBlock.select();
+            } catch (e) {
+              console.warn('[nezar-blockly] paste: moveBy failed:', e);
+            }
+            console.log('[nezar-blockly] paste: block "' + (blockJson.type || '?') +
+                        '" inserted at (' + targetX.toFixed(0) + ', ' + targetY.toFixed(0) + ')');
+          }
+        } catch (e) {
+          console.error('[nezar-blockly] paste block error:', e);
+          alert('Не удалось вставить блок: ' + e.message);
+        }
+      },
+      scopeType: ScopeType.WORKSPACE,
+      id: 'nezar_paste_block_json',
+      weight: 6,
+    };
+    registry.register(pasteItem);
+  }
+
+  nezarContextMenuRegistered = true;
+  console.log('[nezar-blockly] context menu items registered (copy/paste JSON)');
+}
+
+// Регистрируем сразу при загрузке скрипта — Blockly уже определён,
+// т.к. blockly.min.js подключён раньше blockly.js в dashboard.html.
+registerNezarContextMenu();
+
+// ============================================================
 // Блоки — все output/inputs только String
 // ============================================================
 Blockly.defineBlocksWithJsonArray([
@@ -343,6 +521,17 @@ Blockly.defineBlocksWithJsonArray([
     "tooltip": "Выполнить команду в ОС-терминале через Native Messaging. Вывод в переменную."
   },
   {
+    "type": "nezar_open_tab",
+    "message0": "открыть вкладку %1",
+    "args0": [
+      { "type": "input_value", "name": "URL", "check": "String" }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#FF6B35",
+    "tooltip": "Открыть URL в новой вкладке браузера (в фоне). Ждёт завершения загрузки до 30 сек."
+  },
+  {
     "type": "nezar_skill",
     "message0": "навык %1 %2",
     "args0": [
@@ -431,6 +620,65 @@ async function nezarSendToDeepSeek(text, url, varName) {
     blocklyVariables[varName] = aiResp.text;
   } else {
     blocklyVariables[varName] = '(таймаут AI)';
+  }
+}
+
+// ============================================================
+// Открыть вкладку браузера (chrome.tabs.create через background.js)
+// ============================================================
+// URL может быть любой: https://, http://, file:// (если разрешено).
+// Вкладка открывается В ФОНЕ (active: false) — пользователь остаётся в NEZAR.
+// Ждёт статус 'complete' до 30 сек, потом продолжает (не блокирует цепочку).
+async function nezarOpenTab(url) {
+  if (!url) {
+    console.warn('[nezar-blockly] open_tab: empty URL');
+    return;
+  }
+  if (isBlocklyAborted()) return;
+  console.log('[nezar-blockly] open_tab:', url.slice(0, 80));
+
+  let resp;
+  try {
+    resp = await chrome.runtime.sendMessage({ action: 'open_tab', url: url });
+  } catch (e) {
+    console.error('[nezar-blockly] open_tab sendMessage failed:', e.message);
+    if (activeProject) {
+      await addHistoryEntry({
+        role: 'assistant',
+        text: '(open_tab ошибка: ' + e.message + ')',
+        timestamp: Date.now(),
+        status: 'err',
+        nodeName: 'open_tab',
+      });
+    }
+    return;
+  }
+
+  if (!resp || !resp.ok) {
+    const errMsg = (resp && resp.error) || 'неизвестная ошибка';
+    console.error('[nezar-blockly] open_tab error:', errMsg);
+    if (activeProject) {
+      await addHistoryEntry({
+        role: 'assistant',
+        text: '(open_tab ошибка: ' + errMsg + ')',
+        timestamp: Date.now(),
+        status: 'err',
+        nodeName: 'open_tab',
+      });
+    }
+    return;
+  }
+
+  console.log('[nezar-blockly] open_tab OK, tabId=' + resp.tabId +
+              (resp.note ? ' (' + resp.note + ')' : ''));
+  if (activeProject) {
+    await addHistoryEntry({
+      role: 'assistant',
+      text: '📂 Opened tab: ' + url + (resp.tabId ? ' (tabId=' + resp.tabId + ')' : ''),
+      timestamp: Date.now(),
+      status: 'ok',
+      nodeName: 'open_tab',
+    });
   }
 }
 
@@ -645,6 +893,9 @@ async function execBlock(block) {
     const cwd = readStr('CWD') || null;
     const varName = readVarName();
     await nezarSendToNative(text, cwd, varName);
+  } else if (t === 'nezar_open_tab') {
+    const url = readStr('URL');
+    await nezarOpenTab(url);
   } else if (t === 'nezar_print') {
     const text = readStr('TEXT');
     if (activeProject) {
@@ -1141,6 +1392,10 @@ function initBlockly() {
     window.addEventListener('resize', () => {
       if (blocklyWorkspace) Blockly.svgResize(blocklyWorkspace);
     });
+    // Регистрируем пункты правого клик-меню (copy/paste block JSON)
+    // Делаем это и здесь (а не только на top-level) на случай если
+    // blockly.js загрузился раньше blockly.min.js.
+    registerNezarContextMenu();
     console.log('[nezar-blockly] initialized');
   } catch (err) {
     console.error('[nezar-blockly] init error:', err);

@@ -351,5 +351,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // dashboard/blockly → background: открыть новую вкладку с URL
+  // Используется блоком «открыть вкладку %1».
+  // Вкладка открывается В ФОНЕ (active: false). Ждём status='complete'
+  // до 30 сек, потом отвечаем (не блокируем цепочку).
+  if (msg.action === 'open_tab') {
+    const url = msg.url;
+    console.log('[nezar-bg] open_tab:', url);
+    if (!url || typeof url !== 'string') {
+      sendResponse({ ok: false, error: 'URL обязателен' });
+      return false;
+    }
+    try {
+      chrome.tabs.create({ url: url, active: false }, (tab) => {
+        if (chrome.runtime.lastError) {
+          console.error('[nezar-bg] open_tab create error:', chrome.runtime.lastError.message);
+          sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        const tabId = tab.id;
+        console.log('[nezar-bg] open_tab created tabId=' + tabId + ', waiting for complete...');
+
+        let settled = false;
+        const listener = (tabId_, info, updatedTab) => {
+          if (tabId_ !== tabId || settled) return;
+          if (info.status === 'complete') {
+            settled = true;
+            chrome.tabs.onUpdated.removeListener(listener);
+            clearTimeout(timeoutId);
+            console.log('[nezar-bg] open_tab tabId=' + tabId + ' complete');
+            sendResponse({ ok: true, tabId: tabId, status: 'complete' });
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+
+        // Таймаут 30 сек — если страница не загрузилась, всё равно отвечаем OK
+        // (вкладка открыта, просто ещё грузится)
+        const timeoutId = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            chrome.tabs.onUpdated.removeListener(listener);
+            console.log('[nezar-bg] open_tab tabId=' + tabId + ' timeout (still loading, returning anyway)');
+            sendResponse({ ok: true, tabId: tabId, status: 'loading', note: 'timeout-30s-but-tab-opened' });
+          }
+        }, 30000);
+      });
+    } catch (e) {
+      console.error('[nezar-bg] open_tab exception:', e);
+      sendResponse({ ok: false, error: e.message });
+    }
+    return true;  // async response
+  }
+
   console.log('[nezar-bg] unhandled message:', msg.action);
 });
