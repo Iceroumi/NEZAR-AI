@@ -240,6 +240,68 @@ let blocklySkills = {};
 let blocklyPromptText = '';
 let blocklyVscodeOutput = '';
 
+// ⚡ Recursion depth tracking для nezarus_call_skill.
+// Защита от infinite recursion — JavaScript stack overflow prevention.
+let nezarSkillCallDepth = 0;
+const NEZAR_MAX_SKILL_DEPTH = 50;
+
+// ============================================================
+// 🐛 DEBUG: логирование переменных + ручная инспекция
+// ============================================================
+// Каждая запись в blocklyVariables логируется в консоль с ПОЛНЫМ значением
+// (без обрезки) — чтобы видеть что реально попадает в переменную.
+//
+// Глобальная функция nezarDumpVars() — вызови из DevTools Console чтобы
+// увидеть текущее состояние всех переменных:
+//   > nezarDumpVars()
+//   > nezarDumpVar("ai_response")   ← только одну переменную
+
+function nezarLogVar(operation, varName, value, extra) {
+  const valStr = (value === null || value === undefined) ? '(null)' : String(value);
+  const len = valStr.length;
+  console.log(
+    '%c[nezar-var] ' + operation + ' "' + varName + '" (len=' + len + ')' +
+    (extra ? ' ' + extra : ''),
+    'color: #00ff88; font-weight: bold;'
+  );
+  console.log('%c─── FULL VALUE ───', 'color: #00ff88;');
+  console.log(valStr);
+  console.log('%c─── END ───', 'color: #00ff88;');
+}
+
+function nezarDumpVars() {
+  console.log('%c════════════ NEZAR VARIABLES DUMP ════════════', 'color: #00ff88; font-weight: bold; font-size: 14px;');
+  const vars = blocklyVariables || {};
+  const keys = Object.keys(vars);
+  if (keys.length === 0) {
+    console.log('%c(empty — no variables set)', 'color: #888;');
+  } else {
+    for (const name of keys) {
+      const val = vars[name];
+      const valStr = (val === null || val === undefined) ? '(null)' : String(val);
+      console.log(
+        '%c▸ ' + name + '%c (len=' + valStr.length + ', type=' + typeof val + ')',
+        'color: #00ff88; font-weight: bold;',
+        'color: #888;'
+      );
+      console.log(valStr);
+    }
+  }
+  console.log('%c════════════ END DUMP (total: ' + keys.length + ' vars) ════════════', 'color: #00ff88; font-weight: bold; font-size: 14px;');
+  return keys.length + ' variables dumped to console';
+}
+
+function nezarDumpVar(name) {
+  const val = blocklyVariables ? blocklyVariables[name] : undefined;
+  nezarLogVar('INSPECT', name, val);
+  return val;
+}
+
+// Экспорт в window для вызова из DevTools Console
+window.nezarDumpVars = nezarDumpVars;
+window.nezarDumpVar = nezarDumpVar;
+window.nezarLogVar = nezarLogVar;
+
 function syncAliases() {
   blocklyVariables = editorState.runtimeVariables;
   blocklySkills = editorState.skills;
@@ -532,6 +594,42 @@ Blockly.defineBlocksWithJsonArray([
     "tooltip": "Открыть URL в новой вкладке браузера (в фоне). Ждёт завершения загрузки до 30 сек."
   },
   {
+    "type": "nezar_extract_command",
+    "message0": "извлечь команду из %1",
+    "args0": [
+      { "type": "input_value", "name": "TEXT", "check": "String" }
+    ],
+    "output": "String",
+    "colour": "#FF6B35",
+    "tooltip": "Берёт текст (например, ответ AI) и возвращает только команду: ищет ```bash code block```, inline `code`, или строку начинающуюся с известной команды. Если команда не найдена — возвращает пустую строку."
+  },
+  {
+    "type": "nezar_regex",
+    "message0": "regex %1 в %2 флаги %3 режим %4",
+    "args0": [
+      { "type": "input_value", "name": "PATTERN", "check": "String" },
+      { "type": "input_value", "name": "INPUT",  "check": "String" },
+      { "type": "field_dropdown", "name": "FLAGS", "options": [
+        [ "i (без регистра)", "i" ],
+        [ "g (все)", "g" ],
+        [ "gi", "gi" ],
+        [ "m (многострочный)", "m" ],
+        [ "gim", "gim" ],
+        [ "без флагов", "" ]
+      ] },
+      { "type": "field_dropdown", "name": "MODE", "options": [
+        [ "первое совпадение", "first" ],
+        [ "все совпадения", "all" ],
+        [ "группа 1", "group1" ],
+        [ "тест (1/0)", "test" ]
+      ] }
+    ],
+    "output": "String",
+    "colour": "#000000",
+    "tooltip": "Ищет в тексте по регулярному выражению. PATTERN — регулярка, INPUT — где искать, FLAGS — флаги, MODE — что вернуть: первое совпадение, все (через перевод строки), первую группу захвата или 1/0 (есть ли совпадение).",
+    "inputsInline": true
+  },
+  {
     "type": "nezar_skill",
     "message0": "навык %1 %2",
     "args0": [
@@ -563,7 +661,8 @@ Blockly.defineBlocksWithJsonArray([
     "previousStatement": null,
     "nextStatement": null,
     "colour": "#34495E",
-    "tooltip": "Добавляет текст в чат"
+    "tooltip": "Добавляет текст в чат. Нажми на шестерёнку, чтобы задать заголовок и формат.",
+    "mutator": "nezar_print_mutator"
   },
   {
     "type": "nezar_wait",
@@ -575,8 +674,201 @@ Blockly.defineBlocksWithJsonArray([
     "nextStatement": null,
     "colour": "#FF9800",
     "tooltip": "Приостановить выполнение на N секунд"
+  },
+  {
+    "type": "nezar_animate",
+    "message0": "анимация %1",
+    "args0": [
+      { "type": "field_dropdown", "name": "ANIM", "options": [
+        [ "три точки",       "dots" ],
+        [ "размышляет…",     "thinking" ],
+        [ "спиннер",         "spinner" ],
+        [ "прогресс-бар",    "progress" ],
+        [ "скелетон",        "skeleton" ]
+      ] }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": "#000000",
+    "tooltip": "Показывает анимацию загрузки в чате. Убирается автоматически при следующем сообщении (ответ ИИ, nezar_print, терминал)."
   }
 ]);
+
+// ============================================================
+// Mutator для блока «вывести в чат» (nezar_print)
+// — добавляет опциональные поля: заголовок (TITLE), формат (FORMAT)
+// — кнопка-шестерёнка на блоке открывает диалог настройки
+// ============================================================
+Blockly.MIXIN_REGISTRY = Blockly.MIXIN_REGISTRY || {};
+
+// Mutator-миксин: знает как разобрать (decompose) и собрать (compose) блок
+const NEZAR_PRINT_MUTATOR_MIXIN = {
+  // Вызывается при изменении блока в mutator-bubble.
+  // Читаем состояние root-блока mutator и обновляем поля основного блока.
+  compose: function(rootBlock) {
+    // Читаем заголовок из подключённого TITLE-блока (если есть)
+    const titleBlock = rootBlock.getInputTargetBlock('TITLE');
+    let titleText = '';
+    if (titleBlock && titleBlock.getField('TEXT')) {
+      titleText = titleBlock.getFieldValue('TEXT') || '';
+    }
+    // Читаем формат из подключённого FORMAT-блока (если есть)
+    const fmtBlock = rootBlock.getInputTargetBlock('FORMAT');
+    let fmtValue = 'plain';
+    if (fmtBlock && fmtBlock.getField('FORMAT')) {
+      fmtValue = fmtBlock.getFieldValue('FORMAT') || 'plain';
+    }
+
+    // Обновляем видимость полей основного блока
+    const wantTitle = !!titleText || !!this.getFieldValue('TITLE');
+    const wantFormat = fmtValue !== 'plain' || !!this.getFieldValue('FORMAT');
+    this.updateShape_(wantTitle, wantFormat);
+
+    if (this.getField('TITLE') && titleText) this.setFieldValue(titleText, 'TITLE');
+    if (this.getField('FORMAT')) this.setFieldValue(fmtValue, 'FORMAT');
+  },
+
+  // Создаём mutator-workspace с root-блоком.
+  // Блоки TITLE и FORMAT выкладываются в flyout справа — пользователь
+  // перетаскивает их в root, чтобы включить опцию.
+  decompose: function(workspace) {
+    const topBlock = workspace.newBlock('nezar_print_mutator_root');
+    topBlock.initSvg();
+    // Подставляем в root текущее состояние, чтобы пользователь видел что включено
+    const hadTitle = !!this.getFieldValue('TITLE');
+    const hadFormat = (this.getFieldValue('FORMAT') && this.getFieldValue('FORMAT') !== 'plain');
+    // Сохраняем начальные значения как поля на root-блоке (для будущей compose-логики)
+    if (topBlock.getField('TITLE_INIT')) {
+      topBlock.setFieldValue(this.getFieldValue('TITLE') || '', 'TITLE_INIT');
+    }
+    if (topBlock.getField('FORMAT_INIT')) {
+      topBlock.setFieldValue(this.getFieldValue('FORMAT') || 'plain', 'FORMAT_INIT');
+    }
+    // Если настройки уже были — автоматически подключаем блоки TITLE/FORMAT
+    if (hadTitle) {
+      const tb = workspace.newBlock('nezar_print_mutator_title');
+      tb.initSvg();
+      if (tb.getField('TEXT') && this.getFieldValue('TITLE')) {
+        tb.setFieldValue(this.getFieldValue('TITLE'), 'TEXT');
+      }
+      const titleInput = topBlock.getInput('TITLE');
+      if (titleInput && titleInput.connection) titleInput.connection.connect(tb.outputConnection);
+    }
+    if (hadFormat) {
+      const fb = workspace.newBlock('nezar_print_mutator_format');
+      fb.initSvg();
+      if (fb.getField('FORMAT') && this.getFieldValue('FORMAT')) {
+        fb.setFieldValue(this.getFieldValue('FORMAT'), 'FORMAT');
+      }
+      const fmtInput = topBlock.getInput('FORMAT');
+      if (fmtInput && fmtInput.connection) fmtInput.connection.connect(fb.outputConnection);
+    }
+    return topBlock;
+  },
+
+  // Сохраняем состояние mutator в mutation-dom (для сериализации)
+  mutationToDom: function() {
+    const container = Blockly.utils.xml.createElement('mutation');
+    const titleVal = this.getFieldValue('TITLE') || '';
+    const fmtVal = this.getFieldValue('FORMAT') || 'plain';
+    container.setAttribute('title', titleVal);
+    container.setAttribute('format', fmtVal);
+    container.setAttribute('has_title', titleVal ? '1' : '0');
+    container.setAttribute('has_format', fmtVal !== 'plain' ? '1' : '0');
+    return container;
+  },
+
+  // Восстанавливаем состояние из mutation-dom
+  domToMutation: function(xmlElement) {
+    const titleVal = xmlElement.getAttribute('title') || '';
+    const fmtVal = xmlElement.getAttribute('format') || 'plain';
+    const hasTitle = xmlElement.getAttribute('has_title') === '1' || !!titleVal;
+    const hasFormat = xmlElement.getAttribute('has_format') === '1' || fmtVal !== 'plain';
+    this.updateShape_(hasTitle, hasFormat);
+    if (this.getField('TITLE') && titleVal) this.setFieldValue(titleVal, 'TITLE');
+    if (this.getField('FORMAT')) this.setFieldValue(fmtVal, 'FORMAT');
+  },
+
+  // Хелпер: добавляет/удаляет поля TITLE и FORMAT в основном блоке
+  updateShape_: function(hasTitle, hasFormat) {
+    // TITLE
+    if (hasTitle && !this.getField('TITLE')) {
+      this.appendDummyInput('TITLE_INPUT')
+        .appendField('заголовок')
+        .appendField(new Blockly.FieldTextInput(''), 'TITLE');
+    } else if (!hasTitle && this.getField('TITLE')) {
+      this.removeInput('TITLE_INPUT');
+    }
+    // FORMAT
+    if (hasFormat && !this.getField('FORMAT')) {
+      const dd = new Blockly.FieldDropdown([
+        ['plain', 'plain'],
+        ['markdown', 'markdown'],
+        ['code', 'code'],
+        ['quote', 'quote'],
+      ]);
+      this.appendDummyInput('FORMAT_INPUT')
+        .appendField('формат')
+        .appendField(dd, 'FORMAT');
+    } else if (!hasFormat && this.getField('FORMAT')) {
+      this.removeInput('FORMAT_INPUT');
+    }
+  },
+};
+
+// Сначала регистрируем блоки, которые живут внутри mutator-bubble.
+// Это невидимые в основной палитре блоки, но Blockly должен знать про них
+// ДО вызова registerMutator (т.к. mutator на них ссылается).
+Blockly.defineBlocksWithJsonArray([
+  {
+    "type": "nezar_print_mutator_root",
+    "message0": "настройки вывода %1 заголовок: %2 %3 формат: %4 %5",
+    "args0": [
+      { "type": "input_dummy" },
+      { "type": "field_label", "name": "TITLE_INIT", "text": "(не задан)" },
+      { "type": "input_value", "name": "TITLE", "check": "TEXT_MUT" },
+      { "type": "field_label", "name": "FORMAT_INIT", "text": "plain" },
+      { "type": "input_value", "name": "FORMAT", "check": "FMT_MUT" }
+    ],
+    "colour": "#34495E",
+    "tooltip": "Перетащи блоки справа, чтобы включить заголовок или формат вывода."
+  },
+  {
+    "type": "nezar_print_mutator_title",
+    "message0": "заголовок %1",
+    "args0": [
+      { "type": "field_input", "name": "TEXT", "text": "" }
+    ],
+    "output": "TEXT_MUT",
+    "colour": "#34495E",
+    "tooltip": "Заголовок выводимого сообщения"
+  },
+  {
+    "type": "nezar_print_mutator_format",
+    "message0": "формат %1",
+    "args0": [
+      {
+        "type": "field_dropdown",
+        "name": "FORMAT",
+        "options": [
+          ['plain', 'plain'],
+          ['markdown', 'markdown'],
+          ['code', 'code'],
+          ['quote', 'quote'],
+        ]
+      }
+    ],
+    "output": "FMT_MUT",
+    "colour": "#34495E",
+    "tooltip": "Формат вывода: обычный / markdown / код / цитата"
+  }
+]);
+
+// Регистрируем миксин-мутатор в Blockly.
+// 3-й аргумент — opt_helperFn (init extension), нам не нужен (null).
+// 4-й аргумент — список типов блоков, которые появятся в flyout mutator-bubble.
+Blockly.Extensions.registerMutator('nezar_print_mutator', NEZAR_PRINT_MUTATOR_MIXIN, null,
+  ['nezar_print_mutator_title', 'nezar_print_mutator_format']);
 
 // ============================================================
 // Функции отправки
@@ -614,13 +906,28 @@ async function nezarSendToDeepSeek(text, url, varName) {
   const aiResp = await waitForAIResponse(90000);
   if (isBlocklyAborted()) {
     blocklyVariables[varName] = '(остановлено пользователем)';
+    nezarLogVar('SET (aborted)', varName, '(остановлено пользователем)');
     return;
   }
+  // 🐛 DEBUG: подробный дамп того что пришло от AI
+  console.log('%c[nezar-blockly] ═════════ AI RESPONSE RECEIVED ═════════',
+    'color: #c084fc; font-weight: bold; font-size: 13px;');
+  console.log('%c[var target] ' + varName, 'color: #c084fc; font-weight: bold;');
+  console.log('%c[text length]', 'color: #888;', (aiResp?.text?.length || 0) + ' chars');
+  console.log('%c[think length]', 'color: #888;', (aiResp?.think?.length || 0) + ' chars');
+  if (aiResp?.think) {
+    console.log('%c─── THINK (размышление) ───', 'color: #ff9800;');
+    console.log(aiResp.think);
+  }
   if (aiResp && aiResp.text) {
+    nezarLogVar('SET (from AI)', varName, aiResp.text, '← COMPARE WITH WHAT YOU SEE IN AI CHAT');
     blocklyVariables[varName] = aiResp.text;
   } else {
+    nezarLogVar('SET (timeout)', varName, '(таймаут AI)');
     blocklyVariables[varName] = '(таймаут AI)';
   }
+  console.log('%c═══════════════════════════════════════════════',
+    'color: #c084fc; font-weight: bold; font-size: 13px;');
 }
 
 // ============================================================
@@ -657,6 +964,7 @@ async function nezarOpenTab(url) {
   if (!resp || !resp.ok) {
     const errMsg = (resp && resp.error) || 'неизвестная ошибка';
     console.error('[nezar-blockly] open_tab error:', errMsg);
+    // По умолчанию в чат НЕ пишется — только ошибки.
     if (activeProject) {
       await addHistoryEntry({
         role: 'assistant',
@@ -671,15 +979,52 @@ async function nezarOpenTab(url) {
 
   console.log('[nezar-blockly] open_tab OK, tabId=' + resp.tabId +
               (resp.note ? ' (' + resp.note + ')' : ''));
-  if (activeProject) {
-    await addHistoryEntry({
-      role: 'assistant',
-      text: '📂 Opened tab: ' + url + (resp.tabId ? ' (tabId=' + resp.tabId + ')' : ''),
-      timestamp: Date.now(),
-      status: 'ok',
-      nodeName: 'open_tab',
-    });
+  // Успешный open_tab по умолчанию НЕ печатается в чат —
+  // пользователь может вывести его сам через блок «вывести в чат», если нужно.
+}
+
+// ============================================================
+// Анимация загрузки в чате (блок nezar_animate)
+// Показывает одну из 5 анимаций: точки / размышляет / спиннер / прогресс / скелетон.
+// Анимация живёт до тех пор, пока в чат не придёт следующее сообщение —
+// тогда addHistoryEntry (dashboard.js) автоматически удалит .nezar-loading-active.
+// ============================================================
+async function nezarAnimate(type) {
+  const chat = document.getElementById('project-history');
+  if (!chat) return;
+
+  // Если уже есть активная анимация — снимаем её (новая заменит старую)
+  chat.querySelectorAll('.nezar-loading-active').forEach((el) => el.remove());
+
+  const wrap = document.createElement('div');
+  wrap.className = 'nezar-loading nezar-loading-active';
+  wrap.dataset.anim = type;
+
+  switch (type) {
+    case 'dots':
+      wrap.innerHTML = '<span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>';
+      break;
+    case 'thinking':
+      wrap.innerHTML = '<span class="ltxt">размышляет</span>' +
+                        '<span class="ldot"></span>' +
+                        '<span class="ldot"></span>' +
+                        '<span class="ldot"></span>';
+      break;
+    case 'spinner':
+      wrap.innerHTML = '<span class="lspin"></span><span class="ltxt">обрабатываю…</span>';
+      break;
+    case 'progress':
+      wrap.innerHTML = '<span class="lbar"><span class="lbar-fill"></span></span>';
+      break;
+    case 'skeleton':
+      wrap.innerHTML = '<span class="lskel"></span><span class="lskel"></span><span class="lskel"></span>';
+      break;
+    default:
+      wrap.innerHTML = '<span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>';
   }
+
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
 }
 
 // ============================================================
@@ -687,9 +1032,21 @@ async function nezarOpenTab(url) {
 // (замена Firebase-маршруту через VSCode)
 // ============================================================
 async function nezarSendToNative(text, cwd, varName) {
-  console.log('[nezar-blockly] Native terminal:', text.slice(0, 60), 'cwd:', cwd, '→ var:', varName);
+  // 🐛 DEBUG: что ПОЛУЧИЛ терминал? (это может отличаться от того что AI показал в чате!)
+  console.log('%c[nezar-blockly] ═════════ SENDING TO TERMINAL ═════════',
+    'color: #ff6b35; font-weight: bold; font-size: 13px;');
+  console.log('%c[output var] ' + (varName || '(none)'), 'color: #ff6b35; font-weight: bold;');
+  console.log('%c[cwd] ' + (cwd || '(default)'), 'color: #888;');
+  nezarLogVar('TERMINAL INPUT (command)', varName || '_cmd', text,
+    '← THIS IS WHAT GETS EXECUTED (compare with AI chat!)');
+  console.log('%c═══════════════════════════════════════════════',
+    'color: #ff6b35; font-weight: bold; font-size: 13px;');
+
   if (isBlocklyAborted()) {
-    if (varName) blocklyVariables[varName] = '(остановлено)';
+    if (varName) {
+      blocklyVariables[varName] = '(остановлено)';
+      nezarLogVar('SET (aborted)', varName, '(остановлено)');
+    }
     return;
   }
 
@@ -703,7 +1060,10 @@ async function nezarSendToNative(text, cwd, varName) {
     });
   } catch (e) {
     console.error('[nezar-blockly] native_run sendMessage failed:', e.message);
-    if (varName) blocklyVariables[varName] = '(ошибка: ' + e.message + ')';
+    if (varName) {
+      blocklyVariables[varName] = '(ошибка: ' + e.message + ')';
+      nezarLogVar('SET (error)', varName, '(ошибка: ' + e.message + ')');
+    }
     if (activeProject) {
       await addHistoryEntry({
         role: 'assistant',
@@ -742,16 +1102,20 @@ async function nezarSendToNative(text, cwd, varName) {
     console.log('[nezar-blockly] Native output → "' + varName + '" (exit=' + exitCode + ', len=' + output.length + ')');
   }
 
+  // По умолчанию в чат НЕ пишется (только ошибки).
+  // Успешный вывод пользователь может отобразить через блок «вывести в чат».
   if (activeProject) {
     const hasError = typeof exitCode === 'number' && exitCode !== 0;
-    await addHistoryEntry({
-      role: 'assistant',
-      text: output,
-      timestamp: Date.now(),
-      status: hasError ? 'err' : 'ok',
-      exitCode,
-      nodeName: 'blockly',
-    });
+    if (hasError) {
+      await addHistoryEntry({
+        role: 'assistant',
+        text: '(terminal ошибка exit=' + exitCode + ')\n' + output,
+        timestamp: Date.now(),
+        status: 'err',
+        exitCode,
+        nodeName: 'blockly_native',
+      });
+    }
   }
 }
 
@@ -766,6 +1130,73 @@ function evalBlock(block) {
   if (t === 'nezar_text') return block.getFieldValue('TEXT') || '';
   if (t === 'nezar_join') {
     return String(evalBlock(block.getInputTargetBlock('A'))) + String(evalBlock(block.getInputTargetBlock('B')));
+  }
+
+  // ⚡ Извлечение команды из текста AI.
+  // Использует extractCommandFromAIResponse() из dashboard.js (если доступна).
+  // Возвращает ONLY команду (найденную в code block / inline code / строке с known cmd).
+  // Если команда не найдена — возвращает пустую строку (не мусор).
+  if (t === 'nezar_extract_command') {
+    const inputBlock = block.getInputTargetBlock('TEXT');
+    const inputText = inputBlock ? String(evalBlock(inputBlock)) : '';
+    if (!inputText) return '';
+    if (typeof extractCommandFromAIResponse === 'function') {
+      const extracted = extractCommandFromAIResponse(inputText);
+      console.log('[nezar-blockly] extract_command: input len=' + inputText.length +
+                  ', output len=' + (extracted || '').length +
+                  ', extracted=' + JSON.stringify((extracted || '').slice(0, 80)));
+      return extracted || '';
+    }
+    console.warn('[nezar-blockly] extract_command: extractCommandFromAIResponse not available, returning input unchanged');
+    return inputText;
+  }
+
+  // ⚡ Поиск по регулярному выражению.
+  // PATTERN — регулярка, INPUT — текст для поиска, FLAGS — флаги (i/g/m), MODE — что вернуть.
+  // Возвращает строку. При ошибке в регулярке — пустая строка + предупреждение в консоль.
+  if (t === 'nezar_regex') {
+    const patBlock = block.getInputTargetBlock('PATTERN');
+    const inBlock  = block.getInputTargetBlock('INPUT');
+    const pattern  = patBlock ? String(evalBlock(patBlock)) : '';
+    const input    = inBlock  ? String(evalBlock(inBlock))  : '';
+    const flags    = block.getFieldValue('FLAGS') || '';
+    const mode     = block.getFieldValue('MODE') || 'first';
+    if (!pattern || !input) return '';
+    let re;
+    try {
+      re = new RegExp(pattern, flags);
+    } catch (e) {
+      console.warn('[nezar-blockly] regex: неверный паттерн ' + JSON.stringify(pattern) + ' — ' + e.message);
+      return '';
+    }
+    try {
+      if (mode === 'test') {
+        return re.test(input) ? '1' : '0';
+      }
+      if (mode === 'all') {
+        // Для перебора всех совпадений нужен флаг g; если его нет — добавляем
+        const reG = flags.indexOf('g') !== -1 ? re : new RegExp(pattern, flags + 'g');
+        const matches = [];
+        let m;
+        let guard = 0;
+        while ((m = reG.exec(input)) !== null && guard < 10000) {
+          matches.push(m[0]);
+          if (m.index === reG.lastIndex) reG.lastIndex++; // защита от zero-width match
+          guard++;
+        }
+        return matches.join('\n');
+      }
+      if (mode === 'group1') {
+        const m = re.exec(input);
+        return (m && typeof m[1] !== 'undefined') ? m[1] : '';
+      }
+      // default: first match (whole match string)
+      const m = re.exec(input);
+      return m ? m[0] : '';
+    } catch (e) {
+      console.warn('[nezar-blockly] regex exec error: ' + e.message);
+      return '';
+    }
   }
 
   if (t === 'variables_get') {
@@ -898,14 +1329,47 @@ async function execBlock(block) {
     await nezarOpenTab(url);
   } else if (t === 'nezar_print') {
     const text = readStr('TEXT');
+    // Опциональные поля, добавляемые mutator-ом: заголовок + формат
+    let title = '';
+    let format = 'plain';
+    try { title = block.getFieldValue('TITLE') || ''; } catch (e) {}
+    try { format = block.getFieldValue('FORMAT') || 'plain'; } catch (e) {}
+
+    // Применяем форматирование к тексту. Заголовок НЕ вмешивается в text —
+    // он передаётся отдельно в history-записи и рисуется UI крупным шрифтом.
+    let displayText = text;
+    if (format === 'code') {
+      displayText = '```\n' + text + '\n```';
+    } else if (format === 'quote') {
+      displayText = text.split('\n').map(l => '> ' + l).join('\n');
+    } else if (format === 'markdown') {
+      // markdown — текст как есть, разметку оставляет пользователь
+      displayText = text;
+    }
+
+    nezarLogVar('PRINT (to chat)', '_print', displayText);
     if (activeProject) {
-      await addHistoryEntry({ role: 'ai', text: text, timestamp: Date.now(), status: 'ok', nodeName: 'blockly' });
+      await addHistoryEntry({
+        role: 'ai',
+        text: displayText,
+        title: title || null,
+        format: format,
+        timestamp: Date.now(),
+        status: 'ok',
+        nodeName: 'blockly_print',
+      });
     }
   } else if (t === 'nezar_wait') {
     const secondsRaw = readStr('TIME');
     const seconds = parseFloat(secondsRaw.replace(',', '.')) || 0;
     const ms = Math.max(0, Math.min(seconds, 300)) * 1000;
     await new Promise((resolve) => setTimeout(resolve, ms));
+  } else if (t === 'nezar_animate') {
+    // Показ анимации загрузки в чате. Анимация живёт до тех пор, пока
+    // в чат не придёт следующее сообщение (history entry) — тогда
+    // addHistoryEntry автоматически уберёт .nezar-loading-active.
+    const anim = block.getFieldValue('ANIM') || 'dots';
+    await nezarAnimate(anim);
   } else if (t === 'variables_set') {
     const varField = block.getField('VAR');
     let name = '';
@@ -927,6 +1391,8 @@ async function execBlock(block) {
     if (!name) name = block.getFieldValue('VAR') || '';
     const val = evalBlock(block.getInputTargetBlock('VALUE'));
     blocklyVariables[name] = val;
+    // 🐛 DEBUG: логируем каждое присвоение переменной
+    nezarLogVar('SET (variables_set block)', name, val);
   } else if (t === 'controls_if') {
     let i = 0;
     while (true) {
@@ -966,8 +1432,33 @@ async function execBlock(block) {
   } else if (t === 'nezar_call_skill') {
     const name = readStr('NAME');
     const doBlock = blocklySkills[name];
-    if (doBlock) await execChain(doBlock);
-    else console.warn('[nezar-blockly] skill NOT FOUND:', name);
+    if (doBlock) {
+      // ⚡ Защита от infinite recursion — глубина до 50, потом abort
+      if (nezarSkillCallDepth >= NEZAR_MAX_SKILL_DEPTH) {
+        console.error('[nezar-blockly] skill "' + name + '" MAX RECURSION DEPTH exceeded (' +
+                      NEZAR_MAX_SKILL_DEPTH + ') — aborting call');
+        if (activeProject) {
+          await addHistoryEntry({
+            role: 'ai',
+            text: '(skill "' + name + '": max recursion depth ' + NEZAR_MAX_SKILL_DEPTH + ' exceeded)',
+            timestamp: Date.now(),
+            status: 'err',
+            error: 'max_recursion_depth',
+            nodeName: 'blockly',
+          });
+        }
+        return;
+      }
+      nezarSkillCallDepth++;
+      console.log('[nezar-blockly] calling skill: ' + name + ' (depth=' + nezarSkillCallDepth + ')');
+      try {
+        await execChain(doBlock);
+      } finally {
+        nezarSkillCallDepth--;
+      }
+    } else {
+      console.warn('[nezar-blockly] skill NOT FOUND:', name);
+    }
   } else {
     console.warn('[nezar-blockly] execBlock unknown:', t);
   }
@@ -1019,6 +1510,8 @@ async function runBlockly(promptText) {
   editorState.skills = {};
   editorState.promptText = promptText || '';
   editorState.vscodeOutput = '';
+  // ⚡ Сброс recursion depth — каждый запуск начинается с depth=0
+  nezarSkillCallDepth = 0;
   syncAliases();
 
   const topBlocks = blocklyWorkspace.getTopBlocks(true);
@@ -1474,6 +1967,7 @@ function toggleBlocklyPanel() {
   // ⚡ Run / Stop кнопки
   const runBtn = document.getElementById('blockly-run-btn');
   const stopBtn = document.getElementById('blockly-stop-btn');
+  const dumpBtn = document.getElementById('blockly-dump-btn');
   if (toggleBtn) toggleBtn.addEventListener('click', toggleBlocklyPanel);
   if (closeBtn) closeBtn.addEventListener('click', toggleBlocklyPanel);
   if (copyBtn) copyBtn.addEventListener('click', () => {
@@ -1529,6 +2023,17 @@ function toggleBlocklyPanel() {
   if (stopBtn) {
     stopBtn.addEventListener('click', () => {
       abortBlockly();
+    });
+  }
+
+  // 🐛 Dump vars: выводит все переменные в DevTools Console
+  if (dumpBtn) {
+    dumpBtn.addEventListener('click', () => {
+      const count = nezarDumpVars();
+      // Меняем текст кнопки на 1.5 сек для визуального feedback
+      const orig = dumpBtn.textContent;
+      dumpBtn.textContent = '✓ dumped ' + count;
+      setTimeout(() => { dumpBtn.textContent = orig; }, 1500);
     });
   }
 

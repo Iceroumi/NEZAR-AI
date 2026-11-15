@@ -386,41 +386,59 @@ function renderProjectHistory() {
     .map((item) => {
       const isResponse = item.role === "assistant";
       const isAI = item.role === "ai";
+      const isUser = !isAI && !isResponse;
       const roleClass = isAI ? " role-ai" : (isResponse ? " role-assistant" : " role-user");
-      const roleLabel = item.nodeName || (isAI ? "ai" : (isResponse ? "terminal" : "вы"));
 
-      let pillText;
-      let pillClass = item.status === "ok" ? "" : " err";
-      if (isAI) {
-        pillText = item.status === "ok" ? "ai" : "ошибка";
+      // Для role-ai (сообщения от блока «вывести в чат»):
+      // заголовок берём из item.title — это то, что пользователь ввёл в блоке.
+      // Если title нет — заголовок не показываем.
+      const aiTitle = (isAI && item.title) ? String(item.title) : "";
+
+      // Шапка остаётся только у user-пузыря (промпт). Для плоских сообщений
+      // шапка скрыта через CSS, поэтому не генерируем её — экономим DOM.
+      let headerHtml = "";
+      if (isUser) {
+        let pillText = "→";
+        let pillClass = item.status === "ok" ? "" : " err";
+        headerHtml =
+          '<div class="ph-header">' +
+          '<span class="ph-role">вы</span>' +
+          '<span class="ph-time">' + formatTime(item.timestamp) + '</span>' +
+          '<span class="ph-pill' + pillClass + '">' + pillText + '</span>' +
+          '<button class="ph-copy" data-action="copy" title="Копировать текст">⧉</button>' +
+          '</div>';
       } else if (isResponse) {
-        if (typeof item.exitCode === "number") {
-          pillText = "exit " + item.exitCode;
-        } else if (item.error === "timeout" || item.error === "native_timeout") {
-          pillText = "таймаут";
-        } else {
-          pillText = item.status === "ok" ? "ок" : "ошибка";
-        }
-      } else {
-        pillText = "→";
+        // Для терминала/open_tab оставим компактную мета-строку (плоской).
+        let pillText = "ок";
+        if (typeof item.exitCode === "number") pillText = "exit " + item.exitCode;
+        else if (item.error === "timeout" || item.error === "native_timeout") pillText = "таймаут";
+        else if (item.status !== "ok") pillText = "ошибка";
+        headerHtml =
+          '<div class="ph-meta">' +
+          '<span class="ph-time">' + formatTime(item.timestamp) + '</span>' +
+          '<span class="ph-pill' + (item.status === "ok" ? "" : " err") + '">' + pillText + '</span>' +
+          '</div>';
       }
 
       const errorLine = item.status === "ok"
         ? ""
         : '<div class="ph-error">' + escapeHtml(item.error || "") + "</div>";
 
+      // Для role-ai: title — большим шрифтом, тело — отдельно, меньше.
+      // Для остальных: тело в ph-body как обычно.
+      let bodyHtml;
+      if (isAI && aiTitle) {
+        bodyHtml =
+          '<div class="ph-title">' + escapeHtml(aiTitle) + '</div>' +
+          '<div class="ph-body">' + escapeHtml(item.text) + errorLine + '</div>';
+      } else {
+        bodyHtml = '<div class="ph-body">' + escapeHtml(item.text) + errorLine + '</div>';
+      }
+
       return (
         '<div class="ph-item' + roleClass + '">' +
-        '<div class="ph-header">' +
-        '<span class="ph-role">' + roleLabel + '</span>' +
-        '<span class="ph-time">' + formatTime(item.timestamp) + '</span>' +
-        '<span class="ph-pill' + pillClass + '">' + pillText + '</span>' +
-        '<button class="ph-copy" data-action="copy" title="Копировать текст">⧉</button>' +
-        '</div>' +
-        '<div class="ph-body">' +
-        escapeHtml(item.text) +
-        errorLine +
-        '</div>' +
+        headerHtml +
+        bodyHtml +
         '</div>'
       );
     })
@@ -526,27 +544,7 @@ function extractCommandFromAIResponse(text) {
 
   console.log('[nezar-dash] extractCommand: analyzing AI response (len=' + text.length + ')');
 
-  // 1. Code block: ```bash ... ``` или ```sh ... ``` или ``` ... ```
-  const codeBlockMatch = text.match(/```(?:bash|sh|shell|zsh|fish|console|terminal)?\s*\n?([\s\S]*?)```/i);
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    const cmd = codeBlockMatch[1].trim();
-    console.log('[nezar-dash] extractCommand: found code block, cmd=' + JSON.stringify(cmd.slice(0, 200)));
-    return cmd;
-  }
-
-  // 2. Inline code: `command`
-  const inlineMatch = text.match(/`([^`\n]{2,200})`/);
-  if (inlineMatch && inlineMatch[1]) {
-    const cmd = inlineMatch[1].trim();
-    if (!cmd.match(/[.!?]/) && !cmd.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are)\s/i)) {
-      console.log('[nezar-dash] extractCommand: found inline code, cmd=' + JSON.stringify(cmd.slice(0, 200)));
-      return cmd;
-    }
-  }
-
-  // 3. Если ответ начинается с известной команды — берём ВЕСЬ текст
-  //    (multi-line скрипт: ls + touch + heredoc + ...).
-  const lines = text.split('\n');
+  // Список известных команд — используется для проверки "похожа ли строка на команду"
   const knownCmds = [
     'ls','cd','echo','cat','grep','find','mkdir','rmdir','rm','cp','mv','touch',
     'chmod','chown','git','npm','npx','yarn','pnpm','node','python','python3','pip',
@@ -560,41 +558,206 @@ function extractCommandFromAIResponse(text) {
     'ip','ping','traceroute','netstat','ss','lsof','systemctl','journalctl',
     'crontab','at','nohup','screen','tmux','xargs','tee','diff','patch','file',
     'stat','basename','dirname','readlink','realpath','tree','du','nc','jq','yq',
+    'bat','exa','rg','fd','fzf','tldr','htop','btop','neofetch','fastfetch',
+    'true','false','test','sleep','yes','seq','shuf','base64','md5sum','sha256sum',
+    'openssl','gpg','hostname','uname','whoami','id','env','printenv','set',
   ];
-  const firstNonEmpty = lines.find(l => l.trim());
-  if (firstNonEmpty) {
-    const firstWord = firstNonEmpty.trim().split(/[\s|=]/)[0];
-    if (knownCmds.includes(firstWord)) {
-      console.log('[nezar-dash] extractCommand: response starts with "' + firstWord + '" — using FULL text');
-      return text.trim();
+
+  // Русские глаголы-действия — если строка начинается с них, это ОПИСАНИЕ шага,
+  // а не команда. Тогда нужно искать реальную команду в inline-code.
+  const russianActionWords = [
+    'Ввести','Проверить','Удалить','Выполнить','Открыть','Запустить','Создать',
+    'Изменить','Перейти','Установить','Вставить','Скопировать','Загрузить',
+    'Сохранить','Переместить','Заменить','Найти','Добавить','Закрыть','Остановить',
+    'Подождать','Обновить','Посмотреть','Записать','Прочитать','Отредактировать',
+    'Настроить','Подключить','Отключить','Собрать','Развернуть','Опубликовать',
+    'Инициализировать','Зафиксировать','Отправить','Получить','Скомпилировать',
+    'Заполнить','Очистить','Выйти','Войти','Перейдите','Введите','Проверьте',
+    'Удалите','Выполните','Откройте','Запустите','Создайте','Измените',
+  ];
+
+  // Хелпер: очищает строку от markdown-префиксов списка
+  const stripListPrefix = (s) => s
+    .replace(/^\s*\d+[\.\)]\s*/, '')   // "1. " или "1) "
+    .replace(/^\s*[-*•]\s*/, '')        // "- ", "* ", "• "
+    .replace(/^\s*\[\s*\]\s*/, '')      // "[ ] " (checkbox)
+    .replace(/^\s*\[\s*x\]\s*/i, '')    // "[x] " (checked)
+    .trim();
+
+  // Хелпер: проверяет, является ли строка командой (первое слово — knownCmd)
+  const isCommandLike = (s) => {
+    if (!s) return false;
+    const cleaned = stripListPrefix(s);
+    if (!cleaned) return false;
+    const firstWord = cleaned.split(/[\s|=]/)[0].replace(/^sudo\s+/, '');
+    return knownCmds.includes(firstWord);
+  };
+
+  // Хелпер: проверяет, является ли строка описанием (начинается с русского глагола)
+  const isDescription = (s) => {
+    if (!s) return false;
+    const cleaned = stripListPrefix(s);
+    if (!cleaned) return false;
+    for (const word of russianActionWords) {
+      if (cleaned.startsWith(word)) return true;
+    }
+    return false;
+  };
+
+  // ─── СТРАТЕГИЯ 1: Code block ```bash ... ``` ─────────────────────────
+  const codeBlockMatch = text.match(/```(?:bash|sh|shell|zsh|fish|console|terminal)?\s*\n?([\s\S]*?)```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    const cmd = codeBlockMatch[1].trim();
+    if (cmd && cmd.length > 0 && cmd.length < 5000) {
+      console.log('[nezar-dash] extractCommand: STRATEGY 1 (code block), cmd=' + JSON.stringify(cmd.slice(0, 200)));
+      return cmd;
     }
   }
 
-  // 4. Первая строка-команда
+  // ─── СТРАТЕГИЯ 2: Найти ВСЕ inline-code блоки ───────────────────────────
+  // AI часто пишет: "1. Ввести `ls -la`" — мы хотим вытащить `ls -la`, а не "Ввести".
+  // Если inline-code находятся в нумерованном списке — берём ПЕРВУЮ (первый шаг).
+  // Если просто в тексте — берём самую длинную (обычно это финальная/главная команда).
+  const inlineMatches = [...text.matchAll(/`([^`\n]{2,500})`/g)];
+  if (inlineMatches.length > 0) {
+    // Фильтруем: только те, что выглядят как команда
+    const candidatesWithCtx = inlineMatches
+      .map((m, idx) => {
+        const cmd = m[1].trim();
+        if (!cmd || cmd.match(/[.!?]$/) || cmd.length < 2) return null;
+        const firstWord = cmd.split(/[\s|=]/)[0].replace(/^sudo\s+/, '');
+        const isKnownCmd = knownCmds.includes(firstWord);
+        const hasShellOps = !!cmd.match(/[\|&;><]/);
+        const isPath = !!cmd.match(/^[/~]/);
+        const isEnvVar = !!cmd.match(/^\w+=\S/);
+        if (!isKnownCmd && !hasShellOps && !isPath && !isEnvVar) return null;
+        // Вычисляем позицию в исходном тексте
+        const matchIndex = m.index;
+        // Берём 80 символов ДО совпадения — чтобы понять контекст (нумерованный список?)
+        const before = text.slice(Math.max(0, matchIndex - 80), matchIndex);
+        const inNumberedList = !!before.match(/\n\s*\d+[\.\)]\s*\D*$/);
+        return { cmd, idx, matchIndex, inNumberedList, length: cmd.length };
+      })
+      .filter(c => c !== null);
+
+    if (candidatesWithCtx.length > 0) {
+      let picked;
+      const numberedListCandidates = candidatesWithCtx.filter(c => c.inNumberedList);
+      if (numberedListCandidates.length > 0) {
+        // В нумерованном списке — берём ПЕРВУЮ команду (первый шаг)
+        picked = numberedListCandidates.sort((a, b) => a.matchIndex - b.matchIndex)[0];
+        console.log('[nezar-dash] extractCommand: STRATEGY 2 (inline in numbered list, picking FIRST step)');
+      } else {
+        // Просто в тексте — берём самую длинную (финальную/главную)
+        picked = candidatesWithCtx.sort((a, b) => b.length - a.length)[0];
+        console.log('[nezar-dash] extractCommand: STRATEGY 2 (inline code, picking LONGEST)');
+      }
+      console.log('  picked: ' + JSON.stringify(picked.cmd.slice(0, 200)));
+      return picked.cmd;
+    }
+  }
+
+  // ─── СТРАТЕГИЯ 3: Строка начинается с known-команды (без префиксов списка) ─
+  const lines = text.split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
-    const firstWord = trimmed.split(/[\s|=]/)[0];
+    if (!trimmed) continue;
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+    const cleaned = stripListPrefix(trimmed);
+    if (!cleaned) continue;
+    const firstWord = cleaned.split(/[\s|=]/)[0].replace(/^sudo\s+/, '');
     if (knownCmds.includes(firstWord)) {
-      console.log('[nezar-dash] extractCommand: found known command line, cmd=' + JSON.stringify(trimmed.slice(0, 200)));
-      return trimmed;
+      // Если строка содержит "#" — это комментарий, берём только команду
+      const withoutComment = cleaned.split(/\s+#/)[0].trim();
+      console.log('[nezar-dash] extractCommand: STRATEGY 3 (line starts with known cmd): ' +
+                  JSON.stringify(withoutComment.slice(0, 200)));
+      return withoutComment;
     }
   }
 
-  // 5. Fallback: первая строка без точек/вопросительных
+  // ─── СТРАТЕГИЯ 4: Multi-line script — первая строка это команда, дальше ещё команды ─
+  // Если 2+ строк начинаются с known-команд — это скрипт, берём весь блок
+  const cmdLines = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const firstWord = stripListPrefix(trimmed).split(/[\s|=]/)[0].replace(/^sudo\s+/, '');
+    if (knownCmds.includes(firstWord)) {
+      cmdLines.push(trimmed);
+    } else if (cmdLines.length > 0 && (trimmed.startsWith('#') || trimmed === '')) {
+      // Продолжаем скрипт через комментарии и пустые строки
+      continue;
+    } else if (cmdLines.length > 0) {
+      // Команды закончились
+      break;
+    }
+  }
+  if (cmdLines.length >= 2) {
+    const script = cmdLines.join('\n');
+    console.log('[nezar-dash] extractCommand: STRATEGY 4 (multi-line script, ' +
+                cmdLines.length + ' lines): ' + JSON.stringify(script.slice(0, 200)));
+    return script;
+  }
+
+  // ─── СТРАТЕГИЯ 5: Поиск shell-конструкций в тексте (pipes, &&, ||) ────────
+  // AI мог написать: "you can use ls | grep foo or cat file && head -5"
+  const shellPattern = /(?:^|[\s])(sudo\s+)?(?:[a-z][\w-]+)(?:\s+[^\n]*?)?(?:\s*(?:\|\||&&|;|\|)\s*(?:[a-z][\w-]+)(?:\s+[^\n]*?)?)+/g;
+  const shellMatches = [...text.matchAll(shellPattern)];
+  for (const m of shellMatches) {
+    const candidate = m[0].trim();
+    if (candidate.length > 5 && candidate.length < 500) {
+      console.log('[nezar-dash] extractCommand: STRATEGY 5 (shell construct): ' +
+                  JSON.stringify(candidate.slice(0, 200)));
+      return candidate;
+    }
+  }
+
+  // ─── СТРАТЕГИЯ 6: Если ответ начинается с русского глагола — это описание ─
+  // Возвращаем пустую строку — safer than garbage.
+  const firstNonEmpty = lines.find(l => l.trim());
+  if (firstNonEmpty && isDescription(firstNonEmpty)) {
+    console.warn('[nezar-dash] extractCommand: STRATEGY 6 — response is a DESCRIPTION (starts with Russian action word), not a command. Returning empty.');
+    // Последняя попытка: поиск inline-code без фильтра (может быть команда в нестандартном формате)
+    if (inlineMatches.length > 0) {
+      // Берём самый длинный inline-code, даже если не похож на команду
+      const longest = inlineMatches
+        .map(m => m[1].trim())
+        .filter(c => c.length > 3 && !c.match(/[.!?]$/))
+        .sort((a, b) => b.length - a.length)[0];
+      if (longest && longest.length > 5) {
+        console.log('[nezar-dash] extractCommand: last-resort inline code: ' + JSON.stringify(longest.slice(0, 200)));
+        return longest;
+      }
+    }
+    return '';
+  }
+
+  // ─── СТРАТЕГИЯ 7: Fallback — если первая строка НЕ описание и НЕ команда ─
+  // Пробуем взять первую строку без признаков предложения
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     if (trimmed.match(/[.!?]/)) continue;
     if (trimmed.length > 300) continue;
-    if (trimmed.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are|here|please|sure)\s/i)) continue;
+    // Английские non-command слова
+    if (trimmed.match(/^(you|the|this|to|in|for|it|if|when|use|using|can|will|is|are|here|please|sure|first|then|next|after|finally)\s/i)) continue;
+    // Маркеры списка
     if (trimmed.match(/^[-*•]\s/)) continue;
-    console.log('[nezar-dash] extractCommand: fallback first plausible line');
+    if (trimmed.match(/^\d+[\.\)]\s/)) continue;
+    // Русские описательные слова в начале
+    if (isDescription(trimmed)) continue;
+    // Если первое слово не похоже на команду — пропускаем
+    const firstWord = stripListPrefix(trimmed).split(/[\s|=]/)[0];
+    if (!knownCmds.includes(firstWord) && !trimmed.match(/[\|&;><]/)) continue;
+    console.log('[nezar-dash] extractCommand: STRATEGY 7 (fallback plausible line): ' + JSON.stringify(trimmed.slice(0, 200)));
     return trimmed;
   }
 
-  console.log('[nezar-dash] extractCommand: no extraction found, using full text');
-  return text.trim();
+  // ─── ФИНАЛ: ничего не нашли — возвращаем пустую ────────────────────────
+  // Лучше пустая команда (нейзар покажет "Не удалось извлечь команду") чем
+  // отправлять в терминал мусор типа "Ввести команду ls -la"
+  console.warn('[nezar-dash] extractCommand: NO command found in AI response — returning empty');
+  return '';
 }
 
 // ============================================================
@@ -645,7 +808,19 @@ function waitForAIResponse(timeoutMs) {
         resolved = true;
         chrome.runtime.onMessage.removeListener(handler);
         if (abortChecker) clearInterval(abortChecker);
-        if (msg.think) console.log('[nezar-dash] AI THINK:', msg.think);
+        // 🐛 DEBUG: что dashboard получил от content script (через background)
+        console.log('%c═══════════ NEZAR DASHBOARD — ANSWER_COMPLETE RECEIVED ═══════════',
+          'color: #c084fc; font-weight: bold; font-size: 13px;');
+        console.log('%c[text length] ' + (msg.text?.length || 0) + ' chars', 'color: #c084fc;');
+        console.log('%c[think length] ' + (msg.think?.length || 0) + ' chars', 'color: #c084fc;');
+        console.log('%c─── FULL TEXT ───', 'color: #c084fc;');
+        console.log(msg.text || '');
+        if (msg.think) {
+          console.log('%c─── FULL THINK ───', 'color: #ff9800;');
+          console.log(msg.think);
+        }
+        console.log('%c═══════════════════════════════════════════════════════',
+          'color: #c084fc; font-weight: bold; font-size: 13px;');
         sendResponse({ ok: true });
         resolve({ text: msg.text || "", think: msg.think || "" });
       } else if (msg.action === "answer_error") {
@@ -715,7 +890,15 @@ function hideProcessingIndicator() {
 
 // Хелпер: добавляет запись в историю активного проекта и сохраняет.
 async function addHistoryEntry(entry) {
+  // Снимаем активную анимацию загрузки (nezar_animate) ДО проверки проекта:
+  // если пришло новое сообщение — индикатор «ждёт ответа» больше не нужен,
+  // даже если проект по какой-то причине не выбран.
+  if (projectHistoryEl) {
+    projectHistoryEl.querySelectorAll('.nezar-loading-active').forEach((el) => el.remove());
+  }
+
   if (!activeProject) return;
+
   if (!Array.isArray(activeProject.history)) activeProject.history = [];
   activeProject.history.push(entry);
   if (activeProject.history.length > 200) {

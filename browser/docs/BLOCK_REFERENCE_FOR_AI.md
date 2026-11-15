@@ -24,6 +24,7 @@ All value inputs accept only **String** type (square slots). Numbers are passed 
 | `nezar_prompt` | `ПРОМПТ` | output | User's prompt text from input field |
 | `nezar_text` | `текст %1` | output | String constant |
 | `nezar_join` | `%1 + %2` | output | Concatenate two strings |
+| `nezar_extract_command` | `извлечь команду из %1` | output | Extract shell command from AI response text (finds code block / inline code / known command line) |
 | `nezar_get_var` | `переменная %1` | output | Get variable by name (legacy) |
 | `nezar_send_deepseek` | `запрос к deepseek %1 вкладка %2 ответ в %3` | statement | Call DeepSeek AI |
 | `nezar_send_qwen` | `запрос к qwen %1 вкладка %2 ответ в %3` | statement | Call Qwen AI |
@@ -83,6 +84,52 @@ Concatenates two strings. Inputs `A` and `B` (both String).
 }
 ```
 Result: `"Hello, " + promptText`.
+
+#### `nezar_extract_command`
+**Critical for AI→terminal flow.** Takes an AI response text (which may contain explanations, numbered step lists, code blocks, inline code) and returns ONLY the shell command. Without this block, the terminal receives the full AI text and tries to execute Russian words like "Ввести", "Проверить" as commands.
+
+**Inputs:**
+- `TEXT` (String) — typically `variables_get` reading the variable saved by `nezar_send_deepseek`/`nezar_send_qwen`/`nezar_send_alice`.
+
+**Returns:** String containing just the command, or empty string if no command found.
+
+**Extraction strategies (in order):**
+1. ``` ```bash code block ``` ``` → return block content
+2. Inline `code` in numbered list → return FIRST (first step)
+3. Inline `code` in prose → return LONGEST (main command)
+4. Line starting with known command (after stripping `1. ` prefix) → return that line
+5. Multi-line script (2+ consecutive command lines) → return all
+6. Shell construct (pipe, &&, ||) in text → return it
+7. Russian description (starts with "Ввести", "Проверить", etc.) → return empty
+8. Fallback plausible line → return it
+
+```json
+{
+  "type": "nezar_extract_command",
+  "inputs": {
+    "TEXT": { "block": { "type": "variables_get", "fields": { "VAR": { "name": "ai_response" } } } }
+  }
+}
+```
+
+**Example usage** (in `nezar_send_native` TEXT slot):
+```json
+{
+  "type": "nezar_send_native",
+  "inputs": {
+    "TEXT": {
+      "block": {
+        "type": "nezar_extract_command",
+        "inputs": {
+          "TEXT": { "block": { "type": "variables_get", "fields": { "VAR": { "name": "ai_response" } } } }
+        }
+      }
+    },
+    "CWD": { "block": { "type": "nezar_text", "fields": { "TEXT": "/tmp" } } },
+    "VAR": { "block": { "type": "variables_get", "fields": { "VAR": { "name": "output" } } } }
+  }
+}
+```
 
 #### `variables_get`
 Reads variable value by name. Field `VAR` is an object `{ "name": "varName" }`.
@@ -656,6 +703,7 @@ If AI's command contains "rm" → don't execute, print warning instead
 8. **Avoid infinite loops** — `controls_whileUntil` has safety limit of 1000 iterations.
 9. **For terminal commands, always specify `CWD`** — usually `/tmp` for safety, or the project path.
 10. **Prompts should be in English or Russian** — both work, but English tends to give more reliable commands from DeepSeek.
+11. **⚠ ALWAYS use `nezar_extract_command` between `nezar_send_deepseek` and `nezar_send_native`** — without it, the terminal receives the FULL AI response (explanations, numbered steps, Russian words) and fails with `/bin/sh: Ввести: not found`. The `nezar_send_deepseek` block saves the FULL response text to its variable; you must extract just the command before passing to `nezar_send_native`.
 
 ---
 
@@ -663,10 +711,25 @@ If AI's command contains "rm" → don't execute, print warning instead
 
 ### Pattern: AI → Terminal → AI verification
 ```
-1. send_deepseek(prompt) → cmd
-2. send_native(cmd, /tmp) → output
+1. send_deepseek(prompt) → ai_response
+2. send_native(
+     TEXT: extract_command(ai_response),    ← CRITICAL: extract command first!
+     CWD: "/tmp"
+   ) → output
 3. send_deepseek("Verify this output: " + output) → verdict
 4. print(verdict)
+```
+
+**⚠ ALWAYS use `extract_command` between `send_deepseek` and `send_native`.**
+If you skip it, the terminal receives the full AI response text (with explanations, numbered steps, Russian descriptions) and tries to execute it as a shell command → `/bin/sh: Ввести: not found`.
+
+### Pattern: Pre-open AI tab then call it
+```
+1. open_tab("https://chat.deepseek.com")
+2. wait 3 sec  (дать вкладке загрузиться)
+3. send_deepseek(prompt, "https://chat.deepseek.com") → ai_response
+4. send_native(extract_command(ai_response), "/tmp") → output
+5. print(output)
 ```
 
 ### Pattern: Multi-model consensus
@@ -711,6 +774,54 @@ If AI's command contains "rm" → don't execute, print warning instead
 1. send_deepseek("Give me URL of official Python docs") → url
 2. open_tab(url)
 3. print("Opened: " + url)
+```
+
+### Pattern: Recursive refinement agent
+Skill calls itself with explicit base case (counter check). Each iteration improves the text via AI, then recurses.
+
+```
+TOP-LEVEL CHAIN:
+1. nezar_skill "refine"
+   DO body = controls_if:
+     IF (iteration < max_iter):
+       - send_deepseek("Improve: " + current_text) → improved
+       - variables_set current_text = improved
+       - print("Iteration " + iteration + " result: " + current_text)
+       - variables_set iteration = iteration + 1
+       - call_skill "refine"   ← RECURSION
+     ELSE: implicit return (base case)
+
+2. print("=== Recursive refinement agent started ===")
+3. variables_set iteration = 0
+4. variables_set max_iter = 3
+5. variables_set current_text = PROMPT
+6. call_skill "refine"   ← triggers recursion (depth 1 → 2 → 3 → return)
+7. print("=== FINAL after " + max_iter + " iterations ===\n" + current_text)
+```
+
+**Key rules for recursion in NEZAR:**
+1. **Always have a base case** — use `controls_if` with explicit exit condition (counter check, empty list, etc.).
+2. **Track depth via a variable** — `iteration`, `depth`, or `counter`. Increment before recursive call.
+3. **Max recursion depth = 50** — interpreter aborts beyond this (returns error to chat). Plan base case accordingly.
+4. **Skills share global variables** — no parameters. Use `variables_set` before recursive call to "pass argument".
+5. **Skill must be DEFINED before CALLED** — top-level chain must execute `nezar_skill` block before `nezar_call_skill` block.
+
+Example: deep file explorer
+```
+1. nezar_skill "explore_dir"
+   DO body = controls_if:
+     IF (depth < 5):
+       - send_native("ls " + current_path, "/") → listing
+       - print("At " + current_path + ":\n" + listing)
+       - send_deepseek("From this ls:\n" + listing + "\nName ONE subdir to explore next, or 'NONE' if no more.") → next_dir
+       - controls_if (next_dir != "NONE"):
+         - variables_set current_path = current_path + "/" + next_dir
+         - variables_set depth = depth + 1
+         - call_skill "explore_dir"   ← RECURSION
+2. variables_set current_path = "/tmp"
+3. variables_set depth = 0
+4. call_skill "explore_dir"
+5. print("Exploration done")
 ```
 
 ---

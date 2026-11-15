@@ -725,7 +725,20 @@
 
       if (isDone) {
         console.log('[nezar-content] COMPLETE! textLen=' + text.length + ' thinkLen=' + think.length);
-        console.log('[nezar-content] FINAL TEXT (first 300 chars):', text.slice(0, 300));
+        // 🐛 DEBUG: полный дамп финального текста — что отправится в dashboard
+        console.log('%c═══════════ NEZAR CONTENT SCRIPT — FINAL TEXT ═══════════',
+          'color: #00ff88; font-weight: bold; font-size: 13px;');
+        console.log('%c[cached element] ' + (cachedAnswerEl?.tagName || '?') +
+          ' class="' + (cachedAnswerEl?.className || '').slice(0, 80) + '"',
+          'color: #00ff88;');
+        console.log('%c[insideThink] ' + (cachedAnswerEl ? isInsideThink(cachedAnswerEl) : 'N/A'),
+          'color: #00ff88;');
+        console.log('%c─── FINAL TEXT (FULL, no truncation) ───', 'color: #00ff88;');
+        console.log(text);
+        console.log('%c─── THINK TEXT (FULL) ───', 'color: #ff9800;');
+        console.log(think);
+        console.log('%c═══════════════════════════════════════════════════════',
+          'color: #00ff88; font-weight: bold; font-size: 13px;');
         sendToBg({ action: 'answer_complete', site: SITE, bindingId: currentBindingId, text: text, think: think });
         stopStreaming();
       }

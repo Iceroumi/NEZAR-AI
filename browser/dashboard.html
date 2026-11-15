@@ -9,19 +9,20 @@
 <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png" />
 <style>
   :root {
-    --grad-from: #121212;
-    --grad-to: #1D2128;
-    --glass: rgba(43, 49, 59, 0.4);
-    --glass-strong: rgba(43, 49, 59, 0.7);
-    --glass-border: #2b313b;
-    --text: rgb(217, 202, 217);
-    --text-dim: rgb(162, 162, 162);
-    --text-mute: rgb(105, 105, 105);
+    --grad-from: #0e0f13;
+    --grad-to: #14161c;
+    /* Плотные (без прозрачности) фоновые цвета — строгий/упорный стиль */
+    --glass: #1b1e26;
+    --glass-strong: #252932;
+    --glass-border: #2f343f;
+    --text: rgb(228, 224, 230);
+    --text-dim: rgb(160, 158, 165);
+    --text-mute: rgb(98, 98, 105);
     --accent: rgb(128, 110, 255);
     --accent-hover: rgb(148, 130, 175);
     --green: #019A5A;
-    --green-soft: rgba(1, 154, 90, 0.7);
-    --green-soft-2: rgba(1, 154, 90, 0.8);
+    --green-soft: #019A5A;
+    --green-soft-2: #01b86c;
     --green-shadow: rgba(1, 154, 90, 0.25);
     --color-secondary: rgb(158, 78, 218);
     --success: #4caf50;
@@ -63,9 +64,7 @@
   .sidebar-inner {
     width: var(--sidebar-w);
     height: 100vh;
-    background: rgba(8, 8, 8, 0.35);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: #0a0b0e;
     border-right: 1px solid var(--glass-border);
     display: flex;
     flex-direction: column;
@@ -124,9 +123,7 @@
     height: 38px;
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: #1b1e26;
     color: var(--text);
     cursor: pointer;
     display: none;
@@ -134,7 +131,7 @@
     justify-content: center;
     transition: background 0.15s ease, transform 0.15s ease;
   }
-  .sidebar-expand-btn:hover { background: rgba(255, 255, 255, 0.15); transform: scale(1.05); }
+  .sidebar-expand-btn:hover { background: #252932; transform: scale(1.05); }
   .sidebar-expand-btn svg { width: 18px; height: 18px; }
   body.sidebar-collapsed .sidebar-expand-btn { display: flex; }
 
@@ -251,18 +248,6 @@
   body.blockly-closed .np-resizer { display: none; }
   body.blockly-closed .np-blockly-side { display: none; }
 
-  .np-watermark {
-    position: absolute;
-    width: 220px;
-    height: 220px;
-    left: 50%;
-    top: 42%;
-    transform: translate(-50%, -50%) rotate(-90deg);
-    opacity: 0.08;
-    pointer-events: none;
-  }
-  .np-watermark svg { width: 100%; height: 100%; display: block; }
-
   .project-header {
     position: absolute;
     top: 28px;
@@ -321,41 +306,65 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 10px 14px;
-    background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md);
+    padding: 0;
     margin-bottom: 8px;
     font-size: 13px;
-    max-width: 75%;
   }
+  /* Только ПРОМПТ (role-user) остаётся пузырём диалога */
   .ph-item.role-user {
     margin-left: auto;
-    background: rgba(0, 122, 204, 0.1);
-    border-color: rgba(0, 122, 204, 0.3);
+    max-width: 75%;
+    padding: 10px 14px;
+    background: #16283a;
+    border: 1px solid #1f4060;
     border-right: 3px solid var(--accent);
+    border-radius: var(--radius-md);
     border-top-right-radius: 2px;
     border-bottom-right-radius: 2px;
   }
+  /* AI / assistant — плоский текст на фоне, без карточки */
+  .ph-item.role-ai,
   .ph-item.role-assistant {
-    margin-right: auto;
-    background: rgba(1, 154, 90, 0.08);
-    border-color: rgba(1, 154, 90, 0.3);
-    border-left: 3px solid var(--green);
-    border-top-left-radius: 2px;
-    border-bottom-left-radius: 2px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 0 14px 0;
+    max-width: 100%;
   }
-  .ph-item.role-ai {
-    margin-right: auto;
-    background: rgba(138, 43, 226, 0.08);
-    border-color: rgba(138, 43, 226, 0.3);
-    border-left: 3px solid #8a2be2;
-    border-top-left-radius: 2px;
-    border-bottom-left-radius: 2px;
+  .ph-item.role-ai .ph-header,
+  .ph-item.role-assistant .ph-header {
+    display: none;  /* у плоских сообщений нет шапки-карточки */
   }
-  .ph-item .ph-header {
+  /* Заголовок у role-ai — БОЛЬШИМ шрифтом, основной визуальный акцент */
+  .ph-item.role-ai .ph-title {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--text);
+    margin: 0 0 8px 0;
+    letter-spacing: -0.2px;
+  }
+  /* Тело у role-ai — меньше, моноширинный */
+  .ph-item.role-ai .ph-body {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    word-break: break-all;
+    white-space: pre-wrap;
+    line-height: 1.55;
+  }
+  /* assistant (terminal, open_tab, etc.) — обычный плоский текст */
+  .ph-item.role-assistant .ph-body {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    word-break: break-all;
+    white-space: pre-wrap;
+    line-height: 1.55;
+  }
+  /* user-пузырь: его собственная шапка остаётся */
+  .ph-item.role-user .ph-header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -383,13 +392,30 @@
     font-weight: 500;
   }
   .ph-item .ph-pill.err { background: var(--error); }
-  .ph-item .ph-body {
+  .ph-item.role-user .ph-body {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     word-break: break-all;
     white-space: pre-wrap;
     line-height: 1.5;
+    color: var(--text);
   }
   .ph-item .ph-error { color: var(--error); font-size: 11px; margin-top: 4px; }
+
+  /* Компактная мета-строка для плоских assistant-сообщений (terminal, open_tab, ошибки):
+     только время + статус, мелким шрифтом, серым — без карточки */
+  .ph-item .ph-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--text-mute);
+    margin-bottom: 4px;
+  }
+  .ph-item .ph-meta .ph-pill {
+    margin-left: 0;
+    font-size: 9px;
+    padding: 1px 6px;
+  }
   .ph-copy {
     margin-left: auto;
     border: none;
@@ -407,14 +433,109 @@
   .ph-copy:hover { color: var(--text); background: var(--glass-strong); }
   .ph-copy.copied { color: var(--success); opacity: 1; }
 
+  /* ============================================================
+     Анимация загрузки (блок nezar_animate)
+     Показывается плоским текстом на фоне, без карточки — как и другие
+     сообщения. Живёт до тех пор, пока не придёт следующее сообщение.
+     ============================================================ */
+  .nezar-loading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    user-select: none;
+    width: 100%;
+  }
+  .nezar-loading .ltxt { color: var(--text); font-weight: 500; }
+
+  /* Точки (для dots и thinking) */
+  .nezar-loading .ldot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    display: inline-block;
+    animation: nezar-blink 1.4s infinite both;
+  }
+  .nezar-loading .ldot:nth-child(2),
+  .nezar-loading .ltxt + .ldot { animation-delay: 0.2s; }
+  .nezar-loading .ldot:nth-child(3),
+  .nezar-loading .ltxt + .ldot + .ldot { animation-delay: 0.4s; }
+  .nezar-loading .ldot:nth-child(4) { animation-delay: 0.6s; }
+  @keyframes nezar-blink {
+    0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+    40%           { opacity: 1;    transform: translateY(-3px); }
+  }
+
+  /* Спиннер */
+  .nezar-loading .lspin {
+    width: 14px; height: 14px;
+    border: 2px solid var(--glass-border);
+    border-top-color: var(--text);
+    border-radius: 50%;
+    display: inline-block;
+    animation: nezar-spin 0.8s linear infinite;
+  }
+  @keyframes nezar-spin { to { transform: rotate(360deg); } }
+
+  /* Прогресс-бар */
+  .nezar-loading .lbar {
+    width: 200px; height: 4px;
+    background: var(--glass);
+    border-radius: 2px;
+    overflow: hidden;
+    display: inline-block;
+    position: relative;
+  }
+  .nezar-loading .lbar-fill {
+    position: absolute;
+    top: 0; left: 0;
+    width: 40%; height: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: nezar-slide 1.2s ease-in-out infinite;
+  }
+  @keyframes nezar-slide {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+  }
+
+  /* Скелетон (shimmer) */
+  .nezar-loading .lskel {
+    display: block;
+    width: 100%;
+    max-width: 360px;
+    height: 10px;
+    background: var(--glass);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  .nezar-loading .lskel:last-child { max-width: 240px; margin-bottom: 0; }
+  .nezar-loading .lskel::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, var(--glass-strong), transparent);
+    animation: nezar-shimmer 1.4s infinite;
+  }
+  @keyframes nezar-shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
   .processing-indicator {
     margin-right: auto;
-    background: rgba(138, 43, 226, 0.08);
-    border-color: rgba(138, 43, 226, 0.3);
+    background: #20132e;
+    border-color: #3a1f50;
     border-left: 3px solid #8a2be2;
   }
   .processing-indicator .ph-pill {
-    background: rgba(138, 43, 226, 0.3);
+    background: #3a1f50;
     color: #c084fc;
     animation: pulse-pill 1.5s ease-in-out infinite;
   }
@@ -480,13 +601,13 @@
   }
   .ai-toggle:hover, .blockly-toggle:hover { background: var(--glass-strong); color: var(--text); }
   .ai-toggle.on {
-    background: rgba(138, 43, 226, 0.2);
-    border-color: rgba(138, 43, 226, 0.5);
+    background: #2a1640;
+    border-color: #5a2f7a;
     color: #c084fc;
   }
   .blockly-toggle.active {
-    background: rgba(112, 52, 232, 0.2);
-    border-color: rgba(112, 52, 232, 0.5);
+    background: #2a1640;
+    border-color: #5a2f7a;
     color: #c084fc;
   }
   .ai-status {
@@ -503,9 +624,7 @@
   .np-prompt-bar {
     box-sizing: border-box;
     height: 56px;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: #1b1e26;
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-lg);
     display: flex;
@@ -742,6 +861,22 @@
   body.blockly-running .blockly-panel-run { display: none; }
   body.blockly-running .blockly-panel-stop { display: flex; }
   body.blockly-running .np-send-btn { opacity: 0.5; pointer-events: none; }
+  .blockly-panel-dump {
+    flex: 0 0 auto;
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    color: #00ff88;
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .blockly-panel-dump:hover { background: var(--glass-strong); color: #00cc66; }
 
   /* ============================================================
      Skeleton-анимация для выполняемого блока (React/Material style)
@@ -856,22 +991,6 @@
 
     <!-- ЛЕВАЯ СТОРОНА: ЧАТ -->
     <div class="np-chat-side" id="np-chat-side">
-    <div class="np-watermark" aria-hidden="true">
-      <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <g clip-path="url(#clip_np)">
-          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -11 14)" fill="#FFFFFF"/>
-          <rect width="149.185" height="115.001" rx="14" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 26 263)" fill="#FFFFFF"/>
-          <rect width="42.7772" height="43.0002" rx="7" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 42 85)" fill="#FFFFFF"/>
-          <rect width="149.185" height="115.001" rx="16" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 -103 181)" fill="#FFFFFF"/>
-          <rect width="149.185" height="115.001" rx="11" transform="matrix(-4.37114e-08 -1 0.999995 -0.00309421 117 100)" fill="#FFFFFF"/>
-        </g>
-        <defs>
-          <clipPath id="clip_np">
-            <rect width="128" height="128" fill="white" transform="translate(5.72205e-06 128) rotate(-90)"/>
-          </clipPath>
-        </defs>
-      </svg>
-    </div>
 
     <!-- Empty state: нет активного проекта -->
     <div class="project-empty-state" id="project-empty-state">
@@ -927,6 +1046,9 @@
           <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/></svg>
           Stop
         </button>
+        <button type="button" class="blockly-panel-dump" id="blockly-dump-btn" title="Показать все переменные в DevTools Console (зелёный лог)">
+          🐛 dump vars
+        </button>
         <button type="button" class="btn btn-ghost blockly-copy-btn" id="blockly-copy-btn" title="Копировать все блоки">⧉</button>
         <button type="button" class="btn btn-ghost blockly-paste-btn" id="blockly-paste-btn" title="Вставить блоки">📋</button>
         <button type="button" class="btn btn-ghost blockly-export-btn" id="blockly-export-btn" title="Сохранить блоки в файл">💾</button>
@@ -942,6 +1064,8 @@
           <block type="nezar_prompt"></block>
           <block type="nezar_text"></block>
           <block type="nezar_join"></block>
+          <block type="nezar_extract_command"></block>
+          <block type="nezar_regex"></block>
         </category>
         <category name="Действия" colour="#5757FF">
           <block type="nezar_send_deepseek"></block>
@@ -950,6 +1074,7 @@
           <block type="nezar_send_native"></block>
           <block type="nezar_open_tab"></block>
           <block type="nezar_print"></block>
+          <block type="nezar_animate"></block>
         </category>
         <category name="Навыки" colour="#9B59B6">
           <block type="nezar_skill"></block>
